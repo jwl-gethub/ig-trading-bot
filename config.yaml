@@ -126,6 +126,12 @@ strategy:
     lookback: 250
     low_pctile: 5        # skip dead markets (spread eats the edge)
     high_pctile: 95      # skip shock volatility (news spikes)
+    # data hygiene (bad ticks in broker feeds)
+    hygiene_lookback: 50
+    wick_clip_mult: 6     # wicks longer than 6x prior median range are trimmed
+    tr_cap_mult: 4        # each bar counts at most 4x median range in ATR
+    spike_mult: 10        # bar range > 10x median = suspected bad data...
+    spike_block_bars: 3   # ...no new entries for 3 bars
   trend:
     ema_fast: 20
     ema_mid: 50

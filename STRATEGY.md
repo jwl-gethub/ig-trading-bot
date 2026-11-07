@@ -34,6 +34,11 @@ Trade only the markets that `python -m bot.feasibility` marks **OK** for your eq
 | Structure | Donchian channel (20, prior bars) | Breakout trigger |
 | Mean reversion | RSI(2) | Short-term oversold/overbought trigger |
 
+**Data hygiene.** Broker feeds occasionally contain bad ticks. On live IG data, Germany 40 once showed a 7,285-point range in a single 4H bar against a typical 144. All three rules below compare against the median range of the *previous* 50 bars, so nothing looks ahead:
+- Wicks longer than 6× that median are trimmed.
+- Each bar counts at most 4× the median in ATR.
+- Any bar wider than 10× the median blocks new entries for 3 bars.
+
 Volume is excluded on purpose: IG's volume is tick volume and isn't reliable.
 
 ## 4. Regime filter (decided on every closed bar)

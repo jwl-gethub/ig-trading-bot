@@ -37,7 +37,7 @@ import pandas as pd
 from .config import load_config, market_map
 from .ig_client import IGClient, SafetyError
 from .feasibility import feasibility_row
-from .indicators import atr, compute_all, true_range
+from .indicators import compute_all, true_range
 from .risk import RiskManager, RiskState
 from .strategy import PositionState, Strategy
 
@@ -385,7 +385,7 @@ class LiveRunner:
                 if df is None or len(df) < 30:
                     continue
                 info = self.broker.market_info(mkt["epic"])
-                a = float(atr(df, self.cfg["strategy"]["volatility"]["atr_len"]).iloc[-1])
+                a = float(compute_all(df, self.cfg["strategy"])["atr"].iloc[-1])
                 stop = max(t["stop_atr"] * a, info.min_stop_distance * 1.05)
                 spread = info.spread if info.spread == info.spread else None   # NaN when market closed
                 row = feasibility_row(name, equity, self.risk.current_risk_pct(), info.min_size, stop,

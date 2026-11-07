@@ -17,7 +17,7 @@ import os
 import pandas as pd
 
 from .config import load_config
-from .indicators import atr
+from .indicators import compute_all
 
 
 def feasibility_row(name: str, equity: float, risk_pct: float, min_size: float,
@@ -46,7 +46,7 @@ def report(cfg: dict, equity: float, bars_by_market: dict[str, pd.DataFrame],
         df = bars_by_market.get(mk["name"])
         if df is None or len(df) < 20:
             continue
-        a = float(atr(df, cfg["strategy"]["volatility"]["atr_len"]).iloc[-1])
+        a = float(compute_all(df, cfg["strategy"])["atr"].iloc[-1])
         stop = min(t["stop_atr"], m["stop_atr"] if "meanrev" in mk["modules"] else t["stop_atr"]) * a
         rows.append(feasibility_row(mk["name"], equity, rp, min_sizes.get(mk["name"], mk["min_size"]),
                                     stop, mk["point_value"], (spreads or {}).get(mk["name"],
@@ -65,7 +65,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.data:
         from .data import load_dir
         bars = load_dir(args.data, cfg["markets"])
-        bars = {k: v.tail(200) for k, v in bars.items()}
+        bars = {k: v.tail(300) for k, v in bars.items()}
         equity = args.equity or cfg["backtest"]["initial_equity"]
         mins, spreads = {}, {}
     else:
@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> None:
         for mk in cfg["markets"]:
             info = client.market_info(mk["epic"])
             mins[mk["name"]], spreads[mk["name"]] = info.min_size, info.spread
-            bars[mk["name"]] = client.bars(mk["epic"], cfg["timeframe"], 40)  # small: saves allowance
+            bars[mk["name"]] = client.bars(mk["epic"], cfg["timeframe"], 80)  # small: saves allowance
 
     df = report(cfg, equity, bars, mins, spreads)
     pd.set_option("display.width", 160)

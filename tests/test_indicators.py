@@ -34,3 +34,24 @@ def test_ready_after_warmup(cfg):
     assert not out["ready"].iloc[:200].any()
     assert out["ready"].iloc[-1]
     assert (out["atr"].dropna() > 0).all()
+
+
+def test_bad_tick_does_not_blow_up_atr(cfg):
+    df = synthetic_market(9, 400, 25_000.0, 0.004)
+    clean = compute_all(df, cfg["strategy"])
+    bad = df.copy()
+    ts = bad.index[380]
+    bad.loc[ts, "high"] = bad.loc[ts, "close"] + 7_000          # absurd spike wick
+    dirty = compute_all(bad, cfg["strategy"])
+    ratio = dirty["atr"].iloc[-1] / clean["atr"].iloc[-1]
+    assert ratio < 1.6, f"ATR inflated x{ratio:.1f} by one bad tick"
+    assert dirty["data_spike"].loc[ts]
+    assert not dirty["vol_ok"].loc[ts]                          # no entries on the spike bar
+    assert dirty["dc_high"].iloc[-1] < bad.loc[ts, "high"]      # Donchian not poisoned
+
+
+def test_real_trend_bodies_survive_cleaning(cfg):
+    from bot.indicators import clean_bars
+    df = synthetic_market(10, 300, 1000.0, 0.003)
+    out = clean_bars(df)
+    assert (out["open"] == df["open"]).all() and (out["close"] == df["close"]).all()

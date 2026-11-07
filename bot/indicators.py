@@ -100,6 +100,37 @@ def rolling_percentile(s: pd.Series, n: int) -> pd.Series:
     return pd.Series(out, index=s.index)
 
 
+def clean_bars(df: pd.DataFrame, lookback: int = 50, wick_mult: float = 6.0) -> pd.DataFrame:
+    """Cap absurd wicks (bad ticks) at wick_mult x the median true range of the PRIOR bars.
+
+    Bodies (open/close) are never changed, so real moves survive; a lone spike wick that
+    would wreck ATR, Donchian and Bollinger values is trimmed. Causal: uses bars < t only.
+    """
+    out = df[["open", "high", "low", "close"]].astype(float).copy()
+    med = true_range(out).rolling(lookback, min_periods=10).median().shift(1)
+    cap = (wick_mult * med).fillna(np.inf)
+    top = out[["open", "close"]].max(axis=1)
+    bot = out[["open", "close"]].min(axis=1)
+    out["high"] = np.minimum(out["high"], top + cap)
+    out["low"] = np.maximum(out["low"], bot - cap)
+    return out
+
+
+def robust_atr(df: pd.DataFrame, n: int, lookback: int = 50, tr_cap_mult: float = 4.0) -> pd.Series:
+    """ATR whose per-bar true range is capped at tr_cap_mult x the prior median TR."""
+    tr = true_range(df)
+    med = tr.rolling(lookback, min_periods=10).median().shift(1)
+    capped = np.minimum(tr, (tr_cap_mult * med).fillna(np.inf))
+    return wilder(pd.Series(capped, index=df.index), n)
+
+
+def spike_flags(df: pd.DataFrame, lookback: int = 50, spike_mult: float = 10.0) -> pd.Series:
+    """True where a bar's raw true range exceeds spike_mult x the prior median (likely bad data)."""
+    tr = true_range(df)
+    med = tr.rolling(lookback, min_periods=10).median().shift(1)
+    return (tr > spike_mult * med).fillna(False)
+
+
 REQUIRED_COLS = [
     "ema_fast", "ema_mid", "ema_slow", "atr", "adx", "plus_di", "minus_di", "macd_hist",
     "rsi", "rsi_fast", "bb_lower", "bb_mid", "bb_upper", "dc_high", "dc_low", "atr_pctile",
@@ -110,14 +141,17 @@ REQUIRED_COLS = [
 def compute_all(df: pd.DataFrame, p: dict) -> pd.DataFrame:
     """Add every indicator column used by the strategy. `p` = cfg['strategy']."""
     t, m, r, v = p["trend"], p["meanrev"], p["regime"], p["volatility"]
-    base = df[["open", "high", "low", "close"]].astype(float)
+    lb = v.get("hygiene_lookback", 50)
+    raw = df[["open", "high", "low", "close"]].astype(float)
+    spikes = spike_flags(raw, lb, v.get("spike_mult", 10.0))
+    base = clean_bars(raw, lb, v.get("wick_clip_mult", 6.0))
     c = base["close"]
     col: dict[str, pd.Series] = {k: base[k] for k in ("open", "high", "low", "close")}
 
     col["ema_fast"] = ema(c, t["ema_fast"])
     col["ema_mid"] = ema(c, t["ema_mid"])
     col["ema_slow"] = ema(c, t["ema_slow"])
-    col["atr"] = atr(base, v["atr_len"])
+    col["atr"] = robust_atr(base, v["atr_len"], lb, v.get("tr_cap_mult", 4.0))
     col["adx"], col["plus_di"], col["minus_di"] = adx(base, r["adx_len"])
     _, _, col["macd_hist"] = macd(c, t["macd_fast"], t["macd_slow"], t["macd_signal"])
     col["rsi"] = rsi(c, t["rsi_len"])
@@ -141,6 +175,8 @@ def compute_all(df: pd.DataFrame, p: dict) -> pd.DataFrame:
     regime = np.select(
         [adx_v >= r["adx_trend"], adx_v <= r["adx_range"]], ["TREND", "RANGE"], default="NEUTRAL"
     )
-    vol_ok = (out["atr_pctile"] >= v["low_pctile"]) & (out["atr_pctile"] <= v["high_pctile"])
+    block = int(v.get("spike_block_bars", 3))
+    recent_spike = spikes.astype(float).rolling(block, min_periods=1).max() > 0
+    vol_ok = (out["atr_pctile"] >= v["low_pctile"]) & (out["atr_pctile"] <= v["high_pctile"]) & ~recent_spike
     ready = out[REQUIRED_COLS].notna().all(axis=1)
-    return out.assign(regime=regime, vol_ok=vol_ok, ready=ready)
+    return out.assign(regime=regime, vol_ok=vol_ok, ready=ready, data_spike=spikes)
