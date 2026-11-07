@@ -37,7 +37,7 @@ import pandas as pd
 from .config import load_config, market_map
 from .ig_client import IGClient, SafetyError
 from .feasibility import feasibility_row
-from .indicators import atr, compute_all
+from .indicators import atr, compute_all, true_range
 from .risk import RiskManager, RiskState
 from .strategy import PositionState, Strategy
 
@@ -390,7 +390,12 @@ class LiveRunner:
                 spread = info.spread if info.spread == info.spread else None   # NaN when market closed
                 row = feasibility_row(name, equity, self.risk.current_risk_pct(), info.min_size, stop,
                                       mkt["point_value"], spread)
-                self.event("FEASIBILITY", equity=round(equity, 2), **row)
+                tail = df.tail(60)
+                tr = true_range(tail).iloc[1:]
+                self.event("FEASIBILITY", equity=round(equity, 2), atr=round(a, 2),
+                           median_tr_60=round(float(tr.median()), 2), max_tr_60=round(float(tr.max()), 2),
+                           max_tr_bar=str(tr.idxmax()), last_close=round(float(tail["close"].iloc[-1]), 2),
+                           bars=len(df), first_bar=str(df.index[0]), **row)
         except Exception as exc:  # informational only; never block trading startup
             self.event("FEASIBILITY_ERROR", error=repr(exc))
 
