@@ -165,14 +165,17 @@ class IGClient:
         inst, rules, snap = d["instrument"], d["dealingRules"], d["snapshot"]
         currency = next((c["code"] for c in inst.get("currencies", []) if c.get("isDefault")),
                         (inst.get("currencies") or [{"code": "GBP"}])[0]["code"])
+        # bid/offer are null while a market is closed (weekends, holidays)
+        bid = float(snap["bid"]) if snap.get("bid") is not None else float("nan")
+        offer = float(snap["offer"]) if snap.get("offer") is not None else float("nan")
         min_stop = rules.get("minNormalStopOrLimitDistance") or {}
         stop_val = float(min_stop.get("value") or 0.0)
         if min_stop.get("unit") == "PERCENTAGE":
-            stop_val = stop_val / 100 * float(snap["offer"])
+            stop_val = stop_val / 100 * offer if offer == offer else 0.0
         return MarketInfo(
             epic=epic,
-            tradeable=snap.get("marketStatus") == "TRADEABLE",
-            bid=float(snap["bid"]), offer=float(snap["offer"]),
+            tradeable=snap.get("marketStatus") == "TRADEABLE" and bid == bid and offer == offer,
+            bid=bid, offer=offer,
             min_size=float(rules["minDealSize"]["value"]),
             min_stop_distance=stop_val,
             expiry=inst.get("expiry") or "-",

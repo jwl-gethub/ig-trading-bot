@@ -119,6 +119,11 @@ class InstanceLock:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps({"owner": self.owner, "ts": time.time()}))
 
+    def release(self) -> None:
+        """Mark the lock stale so the next deployment can take over immediately."""
+        if self._read().get("owner") == self.owner:
+            self.path.write_text(json.dumps({"owner": self.owner, "ts": 0}))
+
 
 def load_dotenv(path: str = ".env") -> None:
     p = Path(path)
@@ -382,8 +387,9 @@ class LiveRunner:
                 info = self.broker.market_info(mkt["epic"])
                 a = float(atr(df, self.cfg["strategy"]["volatility"]["atr_len"]).iloc[-1])
                 stop = max(t["stop_atr"] * a, info.min_stop_distance * 1.05)
+                spread = info.spread if info.spread == info.spread else None   # NaN when market closed
                 row = feasibility_row(name, equity, self.risk.current_risk_pct(), info.min_size, stop,
-                                      mkt["point_value"], info.spread)
+                                      mkt["point_value"], spread)
                 self.event("FEASIBILITY", equity=round(equity, 2), **row)
         except Exception as exc:  # informational only; never block trading startup
             self.event("FEASIBILITY_ERROR", error=repr(exc))
@@ -462,6 +468,7 @@ def main(argv: list[str] | None = None) -> None:
 
     def _sigterm(*_):
         runner.save_state()
+        lock.release()
         raise SystemExit(0)
     signal.signal(signal.SIGTERM, _sigterm)
 

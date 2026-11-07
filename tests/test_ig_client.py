@@ -93,3 +93,13 @@ def test_market_info_and_bars_parsing():
     assert info.min_size == 0.5 and info.expiry == "DFB" and info.tradeable and round(info.spread, 1) == 0.6
     df = c.bars("E", "HOUR_4", 3)
     assert df["close"].iloc[0] == 11.5 and str(df.index[0].tz) == "UTC"
+
+
+def test_market_info_when_market_closed():
+    market = {"instrument": {"expiry": "DFB", "currencies": [{"code": "GBP", "isDefault": True}]},
+              "dealingRules": {"minDealSize": {"value": 0.5},
+                               "minNormalStopOrLimitDistance": {"unit": "PERCENTAGE", "value": 0.5}},
+              "snapshot": {"bid": None, "offer": None, "marketStatus": "EDITS_ONLY"}}
+    c = client({("GET", "/markets/E"): Resp(200, market)})
+    info = c.market_info("E")
+    assert not info.tradeable and info.min_size == 0.5 and info.min_stop_distance == 0.0

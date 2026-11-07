@@ -169,6 +169,9 @@ def test_instance_lock_blocks_second_bot(tmp_path):
     assert not b.try_acquire()        # fresh heartbeat from another owner
     b.stale = 0
     assert b.try_acquire()            # stale heartbeat -> takeover allowed
+    c = InstanceLock(tmp_path / "bot.lock")
+    b.release()
+    assert c.try_acquire()            # released on shutdown -> instant takeover
 
 
 def test_dry_run_env_override(cfg, monkeypatch):
