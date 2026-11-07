@@ -27,6 +27,7 @@ import logging
 import os
 import signal
 import socket
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -35,7 +36,8 @@ import pandas as pd
 
 from .config import load_config, market_map
 from .ig_client import IGClient, SafetyError
-from .indicators import compute_all
+from .feasibility import feasibility_row
+from .indicators import atr, compute_all
 from .risk import RiskManager, RiskState
 from .strategy import PositionState, Strategy
 
@@ -234,7 +236,10 @@ class LiveRunner:
                 df.to_csv(self._cache_path(name))
                 self.next_check[name] = df.index[-1] + 2 * self.bar_delta + pd.Timedelta(seconds=30)
             else:
-                self.next_check[name] = now + pd.Timedelta(minutes=15)
+                # bar late -> retry soon; market closed (weekend/holiday) -> back off to save allowance
+                last_close = (df.index[-1] + self.bar_delta) if len(df) else now
+                closed = (now - last_close) > 2 * self.bar_delta
+                self.next_check[name] = now + pd.Timedelta(minutes=60 if closed else 15)
         return updated
 
     # ---------------- reconciliation
@@ -362,7 +367,26 @@ class LiveRunner:
         self.broker.login()
         self.warm_up(now)
         self.reconcile(now)
+        self.log_feasibility()
         self.save_state()
+
+    def log_feasibility(self) -> None:
+        """Log, per market, whether current equity can size a trade within the risk cap."""
+        try:
+            equity = self.broker.equity()
+            t = self.cfg["strategy"]["trend"]
+            for name, mkt in self.mkts.items():
+                df = self.bars.get(name)
+                if df is None or len(df) < 30:
+                    continue
+                info = self.broker.market_info(mkt["epic"])
+                a = float(atr(df, self.cfg["strategy"]["volatility"]["atr_len"]).iloc[-1])
+                stop = max(t["stop_atr"] * a, info.min_stop_distance * 1.05)
+                row = feasibility_row(name, equity, self.risk.current_risk_pct(), info.min_size, stop,
+                                      mkt["point_value"], info.spread)
+                self.event("FEASIBILITY", equity=round(equity, 2), **row)
+        except Exception as exc:  # informational only; never block trading startup
+            self.event("FEASIBILITY_ERROR", error=repr(exc))
 
     def tick(self, now: pd.Timestamp | None = None) -> bool:
         """One decision cycle. Returns False when the bot must stop."""
@@ -419,7 +443,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--state-dir", default=None)
     args = ap.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout,
+                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
     load_dotenv()
     cfg = load_config(args.config)
     apply_env_overrides(cfg)

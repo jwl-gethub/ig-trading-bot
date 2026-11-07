@@ -187,3 +187,12 @@ def test_main_waits_for_credentials_instead_of_crashing(tmp_path, monkeypatch):
     from tests.conftest import ROOT
     main(["--config", str(ROOT / "config.yaml"), "--state-dir", str(tmp_path / "s"), "--once"])
     assert (tmp_path / "s" / "bot.lock").exists()
+
+
+def test_startup_logs_feasibility(cfg, make_broker, tmp_path):
+    cfg = _cfg3(cfg)
+    broker = make_broker(cfg, equity=2_000)
+    _runner(cfg, broker, tmp_path, dry_run=True)
+    lines = [json.loads(x) for x in (tmp_path / "logs" / "decisions.jsonl").read_text().splitlines()]
+    feas = [x for x in lines if x["event"] == "FEASIBILITY"]
+    assert len(feas) == 3 and all("verdict" in f for f in feas)
