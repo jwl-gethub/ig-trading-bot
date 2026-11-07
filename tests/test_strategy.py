@@ -78,3 +78,11 @@ def test_meanrev_time_stop(cfg):
         assert not st.manage(p, row).close
     d = st.manage(p, row)
     assert d.close and d.reason == "time_stop"
+
+
+def test_excursions_tracked(cfg):
+    st = Strategy(cfg["strategy"])
+    p = _pos()
+    st.manage(p, trend_row(high=104.0, low=97.0, close=103.0))
+    st.manage(p, trend_row(high=102.0, low=99.0, close=101.0))
+    assert p.mfe_pts == 4.0 and p.mae_pts == 3.0

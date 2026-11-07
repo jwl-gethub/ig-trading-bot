@@ -199,3 +199,40 @@ def test_startup_logs_feasibility(cfg, make_broker, tmp_path):
     lines = [json.loads(x) for x in (tmp_path / "logs" / "decisions.jsonl").read_text().splitlines()]
     feas = [x for x in lines if x["event"] == "FEASIBILITY"]
     assert len(feas) == 3 and all("verdict" in f for f in feas)
+
+
+
+# ---------------------------------------------------------------- learning loop in live
+def test_journal_records_features_and_sentiment(cfg, make_broker, tmp_path):
+    cfg = _cfg3(cfg)
+    broker = make_broker(cfg, equity=100_000)
+    r, start = _runner(cfg, broker, tmp_path, dry_run=False)
+    _run(r, broker, start, 380)
+    recs = [json.loads(x) for x in (tmp_path / "logs" / "trades.jsonl").read_text().splitlines()]
+    assert recs, "expected closed trades in the journal"
+    f = recs[0]["features"]
+    assert f["crowd_long_pct"] == 65.0 and "score" in f and "hour_utc" in f
+    assert recs[0]["mfe_r"] >= 0 and recs[0]["r"] is not None
+
+
+def test_learned_disabled_segments_block_entries(cfg, make_broker, tmp_path):
+    cfg = _cfg3(cfg)
+    broker = make_broker(cfg, equity=100_000)
+    r, start = _runner(cfg, broker, tmp_path, dry_run=False)
+    r.risk.state.disabled_segments = [f"{m}:{mod}" for m in LIVE_TEST_MARKETS for mod in ("trend", "meanrev")]
+    r.risk.state.last_learning_week = "9999-W99"   # keep the weekly review out of this test
+    _run(r, broker, start, 250)
+    assert broker.orders == []
+    events = [json.loads(x) for x in (tmp_path / "logs" / "decisions.jsonl").read_text().splitlines()]
+    assert any(e.get("reason") == "LEARNED_DISABLED" for e in events)
+
+
+def test_weekly_review_runs_once_per_week_and_writes_report(cfg, make_broker, tmp_path):
+    cfg = _cfg3(cfg)
+    broker = make_broker(cfg, equity=100_000)
+    r, start = _runner(cfg, broker, tmp_path, dry_run=True)
+    now = pd.Timestamp("2026-11-09 10:00", tz="UTC")
+    assert r.maybe_learn(now) is not None
+    assert r.maybe_learn(now + pd.Timedelta(days=2)) is None          # same ISO week
+    assert r.maybe_learn(now + pd.Timedelta(days=7)) is not None      # next week
+    assert (tmp_path / "logs" / "learning_report.json").exists()

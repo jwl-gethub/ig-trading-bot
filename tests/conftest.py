@@ -53,9 +53,21 @@ class FakeBroker:
     def market_info(self, epic):
         px = float(self._visible(epic)["close"].iloc[-1])
         return MarketInfo(epic=epic, tradeable=True, bid=px - self.spread / 2, offer=px + self.spread / 2,
-                          min_size=self.min_size, min_stop_distance=1.0, expiry="DFB", currency="GBP")
+                          min_size=self.min_size, min_stop_distance=1.0, expiry="DFB", currency="GBP",
+                          market_id=epic)
+
+    def client_sentiment(self, market_id):
+        return {"long_pct": 65.0, "short_pct": 35.0}
 
     def open_positions(self):
+        # simulate IG's server-side stops: a position whose stop was touched by the latest bar is gone
+        for deal_id, p in list(self.ig_positions.items()):
+            if p.get("stop_level") is None or p["epic"] not in self._bars:
+                continue
+            bar = self._visible(p["epic"]).iloc[-1]
+            hit = bar["low"] <= p["stop_level"] if p["direction"] == "BUY" else bar["high"] >= p["stop_level"]
+            if hit:
+                self.ig_positions.pop(deal_id)
         return list(self.ig_positions.values())
 
     def open_position(self, epic, direction, size, stop_distance, expiry, currency):

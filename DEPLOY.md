@@ -31,6 +31,8 @@ Until the IG credentials are set, the bot idles and logs `waiting for credential
 | Close the bot's positions and stop | `BOT_KILL=1` |
 | Resume after a kill or drawdown halt | Remove `BOT_KILL`, then set `BOT_RESET_HALT` to the code shown in the logs (`reset code: XXXXXX`) |
 | Switch from log-only to demo orders | `BOT_DRY_RUN=false` |
+| Re-enable a segment the learning loop switched off | `BOT_ENABLE_SEGMENTS=EURUSD:meanrev` (comma-separated) |
+| See what it has learned | Logs → search `LEARNING_REPORT` (weekly), or `/data/logs/learning_report.json` |
 | See what it's doing | Railway → Deployments → Logs. Every decision is also kept in `/data/logs/decisions.jsonl` |
 
 Open positions always carry a stop held by IG. If the service stops, those stops still protect you. You can also close any position yourself in the IG app.

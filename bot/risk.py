@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 import secrets
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Iterable
 
 import pandas as pd
@@ -28,6 +28,8 @@ class RiskState:
     halt_reason: str = ""
     halt_code: str = ""
     orders_today: int = 0
+    disabled_segments: list = field(default_factory=list)   # "MARKET:module", set by the learning loop
+    last_learning_week: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)

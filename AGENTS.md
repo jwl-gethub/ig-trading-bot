@@ -32,6 +32,7 @@ Build and maintain a deterministic, rule-based trading bot for the IG REST API. 
 12. **The bot only touches positions it opened** (tracked by dealId in `state/state.json`). Never close or modify manual positions.
 13. **Fail closed.** On unexpected errors, stop opening trades. Existing positions keep their server-side stops.
 14. **Never delete or rewrite** `logs/` or `state/` history.
+15. **The learning loop may only reduce risk.** It can switch a segment off; it must never switch anything on, raise size, loosen limits or change strategy parameters by itself. Improvements it suggests go through the strategy-change protocol and human approval. Never replace it with self-tuning or ML that adapts live.
 
 ## Strategy-change protocol (anti-overfitting)
 

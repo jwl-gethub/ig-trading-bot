@@ -29,7 +29,8 @@ from .config import load_config, market_map
 from .data import load_dir, synthetic_universe
 from .indicators import compute_all
 from .risk import RiskManager
-from .strategy import PositionState, Signal, Strategy
+from .learning import journal_record, review
+from .strategy import PositionState, Signal, Strategy, entry_features
 
 
 @dataclass
@@ -47,6 +48,9 @@ class Trade:
     r_multiple: float
     bars_held: int
     exit_reason: str
+    mfe_r: float = 0.0
+    mae_r: float = 0.0
+    features: dict | None = None
 
 
 @dataclass
@@ -99,12 +103,14 @@ class Backtester:
             pnl = gross - pos.funding
             cash += pnl
             init_risk = pos.initial_risk_points * pos.size * pos.point_value
+            rec = journal_record(pos, px, ts, reason, pnl)
             trades.append(Trade(
                 market=name, module=pos.module, direction=pos.direction, entry_ts=pos.entry_ts,
                 entry_price=round(pos.entry_price, 5), exit_ts=str(ts), exit_price=round(px, 5),
                 size=pos.size, pnl=round(pnl, 2), funding=round(pos.funding, 2),
                 r_multiple=round(pnl / init_risk, 3) if init_risk else 0.0,
                 bars_held=pos.bars_held, exit_reason=reason,
+                mfe_r=rec["mfe_r"], mae_r=rec["mae_r"], features=pos.features,
             ))
             self.risk.on_trade_closed(pnl, ts)
 
@@ -193,6 +199,7 @@ class Backtester:
                     entry_price=row["close"], stop_level=row["close"] - sig.direction * sig.stop_distance,
                     size=sz.size, point_value=mkt["point_value"], initial_risk_points=sig.stop_distance,
                     entry_ts=str(decision_ts), extreme=row["close"], margin=margin, group=mkt["group"],
+                    features=entry_features(sig, row, decision_ts),
                 )
                 exposures = list(positions.values()) + [p for _, p in pending_entry.values()]
                 ok, why = self.risk.check_entry(decision_ts, mkt, exposures, equity, sz.risk_amount, margin)
@@ -301,6 +308,9 @@ def run_cli(argv: list[str] | None = None) -> dict:
     report["halted"] = res.halted
     report["halt_reason"] = res.halt_reason
     report["promotion"] = promotion_check(report, cfg["promotion"])
+    journal = pd.DataFrame([{**asdict(t), "r": t.r_multiple, "segment": f"{t.market}:{t.module}"}
+                            for t in res.trades])
+    report["learning"] = review(journal, cfg)
     if args.synthetic:
         report["data_source"] = "SYNTHETIC RANDOM WALK (no edge exists; expect a loss ~= costs)"
     elif args.synthetic_regimes:

@@ -14,6 +14,7 @@ Human switches (env vars, e.g. Railway Variables; changing one redeploys):
     BOT_KILL=1               close the bot's positions and halt
     BOT_RESET_HALT=<code>    clear a halt using the code printed in the logs
     BOT_MARKETS=EURUSD,GOLD  trade only these markets
+    BOT_ENABLE_SEGMENTS=EURUSD:meanrev   re-enable a segment the learning loop switched off
     STATE_DIR / LOG_DIR      where state, bar cache and logs live (a persistent volume)
 
 Every decision is written to logs/decisions.jsonl; closed trades to logs/trades.csv.
@@ -39,7 +40,9 @@ from .ig_client import IGClient, SafetyError
 from .feasibility import feasibility_row
 from .indicators import compute_all, true_range
 from .risk import RiskManager, RiskState
-from .strategy import PositionState, Strategy
+from .learning import append_journal, journal_record, load_journal, review
+from .learning import settings as learning_settings
+from .strategy import PositionState, Strategy, entry_features
 
 log = logging.getLogger("bot")
 MAX_BARS_KEPT = 1200
@@ -194,8 +197,34 @@ class LiveRunner:
                             "size", "pnl_est", "reason", "deal_id"])
             w.writerow([pos.market, pos.module, pos.direction, pos.entry_ts, pos.entry_price, str(now),
                         exit_px, pos.size, round(pnl, 2), reason, pos.deal_id])
+        rec = journal_record(pos, exit_px, now, reason, pnl)
+        append_journal(self.log_dir / "trades.jsonl", rec)
+        self.event("TRADE_JOURNAL", **{k: v for k, v in rec.items() if k != "features"})
         self.risk.on_trade_closed(pnl, now)
         return pnl
+
+    # ---------------- learning loop
+    def maybe_learn(self, now, force: bool = False) -> dict | None:
+        s = learning_settings(self.cfg)
+        if not s["enabled"]:
+            return None
+        iso = pd.Timestamp(now).isocalendar()
+        week = f"{iso[0]}-W{iso[1]:02d}"
+        if not force and week == self.risk.state.last_learning_week:
+            return None
+        rep = review(load_journal(self.log_dir / "trades.jsonl"), self.cfg, self.risk.state.disabled_segments)
+        for seg in rep["disable"]:
+            if seg not in self.risk.state.disabled_segments:
+                self.risk.state.disabled_segments.append(seg)
+                self.event("SEGMENT_DISABLED", segment=seg,
+                           note="statistically losing; re-enable only via BOT_ENABLE_SEGMENTS after review")
+        self.risk.state.last_learning_week = week
+        (self.log_dir / "learning_report.json").write_text(json.dumps(rep, indent=2, default=str))
+        self.event("LEARNING_REPORT", week=week, trades=rep["trades"], overall=rep.get("overall"),
+                   findings=rep["findings"], suggestions=rep["suggestions"], disabled_now=rep["disable"],
+                   disabled_total=list(self.risk.state.disabled_segments))
+        self.save_state()
+        return rep
 
     # ---------------- bars
     def _cache_path(self, name: str) -> Path:
@@ -308,20 +337,34 @@ class LiveRunner:
             else:
                 self.event("STOP_UPDATE_REJECTED", market=name, reason=res.get("reason"))
 
+    def _sentiment(self, info) -> float | None:
+        if not info.market_id or not hasattr(self.broker, "client_sentiment"):
+            return None
+        try:
+            return float(self.broker.client_sentiment(info.market_id)["long_pct"])
+        except Exception as exc:  # informational only
+            self.event("SENTIMENT_ERROR", market_id=info.market_id, error=repr(exc))
+            return None
+
     def _try_entry(self, name: str, row: dict, equity: float, now) -> None:
         mkt = self.mkts[name]
         sig = self.strategy.entry_signal(mkt, row)
         if not sig:
             return
+        info = self.broker.market_info(mkt["epic"])
+        crowd_long = self._sentiment(info)
+        spread = info.spread if info.spread == info.spread else None
+        features = entry_features(sig, row, now, crowd_long_pct=crowd_long, spread=spread)
         self.event("SIGNAL", market=name, direction=sig.direction, module=sig.module, score=sig.score,
-                   conditions=sig.conditions, snapshot=sig.snapshot)
+                   conditions=sig.conditions, crowd_long_pct=crowd_long, snapshot=sig.snapshot)
 
         def reject(why: str) -> None:
-            self.event("ENTRY_REJECTED", market=name, reason=why)
+            self.event("ENTRY_REJECTED", market=name, module=sig.module, reason=why)
 
+        if f"{name}:{sig.module}" in self.risk.state.disabled_segments:
+            return reject("LEARNED_DISABLED")
         if self.pause_requested():
             return reject("PAUSE_SWITCH")
-        info = self.broker.market_info(mkt["epic"])
         if not info.tradeable:
             return reject("MARKET_NOT_TRADEABLE")
         if info.spread > mkt["max_spread_points"]:
@@ -334,7 +377,8 @@ class LiveRunner:
         prov = PositionState(market=name, direction=sig.direction, module=sig.module, entry_price=info.mid,
                              stop_level=info.mid - sig.direction * stop_dist, size=sz.size,
                              point_value=mkt["point_value"], initial_risk_points=stop_dist,
-                             entry_ts=str(now), extreme=info.mid, margin=margin, group=mkt["group"])
+                             entry_ts=str(now), extreme=info.mid, margin=margin, group=mkt["group"],
+                             features=features)
         ok, why = self.risk.check_entry(now, mkt, list(self.positions.values()), equity, sz.risk_amount, margin)
         if not ok:
             return reject(why)
@@ -413,6 +457,7 @@ class LiveRunner:
             self.event("HALTED", reason=self.risk.state.halt_reason, reset_code=self.risk.state.halt_code)
             return False
 
+        self.maybe_learn(now)
         updated = self.refresh(now)
         if not updated:
             return True
@@ -488,6 +533,12 @@ def main(argv: list[str] | None = None) -> None:
         if args.reset_halt:
             print("halt cleared. Remove the KILL file / BOT_KILL variable too if set.")
             return
+
+    for seg in [x.strip() for x in os.environ.get("BOT_ENABLE_SEGMENTS", "").split(",") if x.strip()]:
+        if seg in runner.risk.state.disabled_segments:
+            runner.risk.state.disabled_segments.remove(seg)
+            runner.event("SEGMENT_REENABLED", segment=seg, via="env")
+    runner.save_state()
 
     missing = [k for k in ("IG_API_KEY", "IG_USERNAME", "IG_PASSWORD") if not os.environ.get(k)]
     if missing:

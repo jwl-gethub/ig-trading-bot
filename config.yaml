@@ -186,6 +186,18 @@ safety:
   max_orders_per_day: 8
   poll_seconds: 60
 
+# ---------------------------------------------------------------------
+# Learning loop (bot/learning.py). It may only switch segments OFF.
+# ---------------------------------------------------------------------
+learning:
+  enabled: true
+  confidence: 0.90                    # width of the range used to call a result real
+  min_trades_for_findings: 30         # fewer trades = "not enough data", never a verdict
+  min_trades_to_disable: 30
+  auto_disable_losing_segments: true  # market+module with clearly negative results -> off
+  disable_confidence: 0.95            # stricter bar for the automatic switch-off
+  sentiment_crowd_threshold: 60       # >=60% of IG clients on one side = "crowded"
+
 backtest:
   initial_equity: 2000
   slippage_frac_of_spread: 0.25   # extra slippage per fill = 0.25 x spread (spreads above are already padded)

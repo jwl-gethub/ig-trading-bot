@@ -130,7 +130,16 @@ Never "fix" this by rounding the stake up or tightening stops below 2×ATR to ma
 
 No martingale, no averaging down, no grid, no adding to losers, no removing or widening stops. No trading on news headlines. No AI deciding trades.
 
-## 11. Promotion path
+## 11. Learning loop (`bot/learning.py`)
+
+1. **Journal.** Every closed trade is saved with its entry context: module, score, conditions met, market type (trending/ranging), ADX, RSI, volatility percentile, distance from EMA200, hour and weekday, spread, and IG client sentiment (% of clients long). Its outcome is saved too: R multiple, max favourable and adverse excursion in R, bars held and exit reason.
+2. **Weekly review.** Results are split by market+module, market, module, market type, score, crowd stance (with or against the IG crowd), session, weekday and exit reason. Each split reports average R with a 90% confidence range. A result is a **finding** only with 30+ trades **and** a range that excludes zero. Below that, it reports "not enough data". The review also measures exits: how much open profit is given back, and how many losers were +1R first.
+3. **Automatic action, off only.** A market+module segment with 30+ trades and a 95% range entirely below zero is disabled. The loop can never enable a segment, increase size or change parameters. Those come out as **suggestions** that must go through the strategy-change protocol and your approval. To re-enable a segment, set `BOT_ENABLE_SEGMENTS=MARKET:module`.
+4. **Sentiment is recorded, not traded.** IG only provides the current sentiment snapshot, so it can't be backtested. The loop compares with-crowd and against-crowd results on live data. If one is clearly better, it suggests a filter.
+
+The same journal format comes out of the backtester (`report.json → learning`), so live and backtest results are directly comparable.
+
+## 12. Promotion path
 
 1. **Backtest:** at least 3 years of data, real costs. Pass criteria: ≥ 100 trades, profit factor ≥ 1.3, max drawdown ≤ 20%, out-of-sample profit factor ≥ 1.15.
 2. **Demo forward test:** at least 6 weeks and at least 30 trades. Live fills and spreads must be in line with backtest assumptions.

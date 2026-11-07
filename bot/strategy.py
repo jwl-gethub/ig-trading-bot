@@ -44,6 +44,9 @@ class PositionState:
     deal_id: str | None = None
     margin: float = 0.0
     group: str = ""
+    mfe_pts: float = 0.0     # max favourable excursion since entry (points)
+    mae_pts: float = 0.0     # max adverse excursion since entry (points)
+    features: dict = field(default_factory=dict)   # entry context, for the learning journal
 
     def open_risk_amount(self) -> float:
         """Money still at risk to the stop, relative to entry (0 once stop is past breakeven)."""
@@ -68,6 +71,25 @@ def _snap(row: Mapping) -> dict:
         v = row.get(k)
         out[k] = round(float(v), 5) if isinstance(v, (int, float)) and k != "regime" else v
     return out
+
+
+def entry_features(sig: Signal, row: Mapping, ts=None, **extra) -> dict:
+    """Context recorded with every trade so the learning loop can segment results."""
+    snap = sig.snapshot
+    atr = snap.get("atr") or float("nan")
+    f = {
+        "module": sig.module, "direction": sig.direction, "score": sig.score,
+        "regime": snap.get("regime"), "adx": snap.get("adx"), "rsi": snap.get("rsi"),
+        "rsi_fast": snap.get("rsi_fast"), "atr": atr, "atr_pctile": snap.get("atr_pctile"),
+        "dist_ema200_atr": round((snap["close"] - snap["ema_slow"]) / atr, 2) if atr == atr and atr else None,
+        "conditions": [k for k, v in sig.conditions.items() if v],
+    }
+    if ts is not None:
+        t = ts if hasattr(ts, "hour") else None
+        if t is not None:
+            f["hour_utc"], f["weekday"] = int(t.hour), int(t.weekday())
+    f.update(extra)
+    return f
 
 
 class Strategy:
@@ -159,6 +181,10 @@ class Strategy:
         d = pos.direction
         pos.bars_held += 1
         pos.extreme = max(pos.extreme, r["high"]) if d == 1 else min(pos.extreme, r["low"])
+        fav = (r["high"] - pos.entry_price) if d == 1 else (pos.entry_price - r["low"])
+        adv = (pos.entry_price - r["low"]) if d == 1 else (r["high"] - pos.entry_price)
+        pos.mfe_pts = max(pos.mfe_pts, float(fav))
+        pos.mae_pts = max(pos.mae_pts, float(adv))
 
         if pos.module == "trend":
             t = self.p["trend"]

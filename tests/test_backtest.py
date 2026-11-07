@@ -56,3 +56,14 @@ def test_drawdown_halt_stops_trading(cfg):
         halt_exits = [t for t in res.trades if t.exit_reason == "halt"]
         assert all(t.exit_ts >= last_entry for t in halt_exits)
         assert compute_metrics(res.equity, res.trades, 20_000)["max_drawdown_pct"] < 25
+
+
+def test_backtest_trades_carry_learning_features(cfg):
+    import pandas as pd
+    from bot.learning import review
+    data = synthetic_universe(cfg["markets"], 1500, regimes=True)
+    res = Backtester(cfg, data, 50_000).run()
+    t = res.trades[0]
+    assert t.features and "score" in t.features and t.mfe_r >= 0 and t.mae_r >= 0
+    j = pd.DataFrame([{**t.__dict__, "r": t.r_multiple, "segment": f"{t.market}:{t.module}"} for t in res.trades])
+    assert review(j, cfg)["trades"] == len(res.trades)

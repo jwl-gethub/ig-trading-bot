@@ -11,6 +11,7 @@ Endpoints used (header `Version` in brackets):
   PUT  /positions/otc/{dealId} [2]   amend stop
   POST /positions/otc [1] + `_method: DELETE`   close position
   GET  /confirms/{dealReference} [1] deal confirmation
+  GET  /clientsentiment/{marketId} [1] % of IG clients long/short (recorded, not traded on)
 
 Published limits (LIVE; demo can be lower): 30 non-trading req/min per account,
 60 per app, 100 trading req/min per account, 10,000 historical price points per week.
@@ -54,6 +55,7 @@ class MarketInfo:
     min_stop_distance: float
     expiry: str
     currency: str
+    market_id: str = ""
 
     @property
     def spread(self) -> float:
@@ -180,7 +182,13 @@ class IGClient:
             min_stop_distance=stop_val,
             expiry=inst.get("expiry") or "-",
             currency=currency,
+            market_id=inst.get("marketId") or "",
         )
+
+    def client_sentiment(self, market_id: str) -> dict:
+        """% of IG clients long/short on a market (current snapshot only; no history)."""
+        d = self._request("GET", f"/clientsentiment/{market_id}", 1).json()
+        return {"long_pct": float(d["longPositionPercentage"]), "short_pct": float(d["shortPositionPercentage"])}
 
     def bars(self, epic: str, resolution: str, n: int) -> pd.DataFrame:
         """Last n bars (mid prices). The newest bar may still be forming — caller drops it."""
