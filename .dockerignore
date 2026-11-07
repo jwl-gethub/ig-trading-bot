@@ -1,0 +1,10 @@
+.env
+.git
+state/
+logs/
+results/
+__pycache__/
+.pytest_cache/
+data/history/*.csv
+KILL
+PAUSE

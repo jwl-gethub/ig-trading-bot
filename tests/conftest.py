@@ -1,0 +1,93 @@
+import copy
+import sys
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from bot.config import load_config  # noqa: E402
+from bot.data import synthetic_market  # noqa: E402
+from bot.ig_client import MarketInfo  # noqa: E402
+
+
+@pytest.fixture
+def cfg():
+    return copy.deepcopy(load_config(ROOT / "config.yaml"))
+
+
+class FakeBroker:
+    """In-memory stand-in for IGClient. Records every order so tests can assert guardrails."""
+
+    def __init__(self, bars: dict[str, pd.DataFrame], equity: float = 10_000, spread: float = 0.5,
+                 min_size: float = 0.5):
+        self._bars = bars            # epic -> full DataFrame
+        self._equity = equity
+        self.spread = spread
+        self.min_size = min_size
+        self.now = None
+        self.orders: list[dict] = []
+        self.closes: list[dict] = []
+        self.stop_updates: list[tuple] = []
+        self.ig_positions: dict[str, dict] = {}
+        self._n = 0
+
+    def login(self):
+        pass
+
+    def equity(self):
+        return self._equity
+
+    def set_equity(self, v):
+        self._equity = v
+
+    def _visible(self, epic):
+        df = self._bars[epic]
+        return df[df.index <= self.now] if self.now is not None else df
+
+    def bars(self, epic, resolution, n):
+        return self._visible(epic).tail(n)
+
+    def market_info(self, epic):
+        px = float(self._visible(epic)["close"].iloc[-1])
+        return MarketInfo(epic=epic, tradeable=True, bid=px - self.spread / 2, offer=px + self.spread / 2,
+                          min_size=self.min_size, min_stop_distance=1.0, expiry="DFB", currency="GBP")
+
+    def open_positions(self):
+        return list(self.ig_positions.values())
+
+    def open_position(self, epic, direction, size, stop_distance, expiry, currency):
+        assert stop_distance and stop_distance > 0, "order without stop reached the broker"
+        self._n += 1
+        deal_id = f"D{self._n}"
+        px = float(self._visible(epic)["close"].iloc[-1])
+        sign = 1 if direction == "BUY" else -1
+        self.orders.append(dict(epic=epic, direction=direction, size=size, stop_distance=stop_distance))
+        self.ig_positions[deal_id] = dict(deal_id=deal_id, epic=epic, direction=direction, size=size,
+                                          level=px, stop_level=px - sign * stop_distance)
+        return {"status": "ACCEPTED", "deal_id": deal_id, "level": px,
+                "stop_level": px - sign * stop_distance}
+
+    def update_stop(self, deal_id, stop_level):
+        p = self.ig_positions.get(deal_id, {})
+        self.stop_updates.append((deal_id, p.get("stop_level"), stop_level, p.get("direction")))
+        if p:
+            p["stop_level"] = stop_level
+        return {"status": "ACCEPTED"}
+
+    def close_position(self, deal_id, direction, size):
+        self.closes.append(dict(deal_id=deal_id, direction=direction, size=size))
+        self.ig_positions.pop(deal_id, None)
+        return {"status": "ACCEPTED", "level": None}
+
+
+@pytest.fixture
+def make_broker():
+    def _make(cfg, n_bars=900, regimes=True, **kw):
+        bars = {}
+        for i, m in enumerate(cfg["markets"]):
+            bars[m["epic"]] = synthetic_market(11 + i, n_bars, 10_000.0, 0.003, regimes=regimes)
+        return FakeBroker(bars, **kw)
+    return _make

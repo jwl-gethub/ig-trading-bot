@@ -1,0 +1,195 @@
+# =====================================================================
+# IG Trading Bot — configuration
+#
+# CODEX: values under `risk:` and `safety:` are ceilings set by the human
+# owner. Never loosen them. bot/config.py HARD_LIMITS cap them in code too.
+# =====================================================================
+
+account:
+  type: SPREADBET          # SPREADBET recommended: every market is GBP per point
+  currency: GBP
+
+timeframe: HOUR_4          # IG price resolution for signals
+bar_hours: 4
+warmup_bars: 300           # EMA200 + 250-bar ATR percentile window need ~265 bars
+
+# ---------------------------------------------------------------------
+# Markets. Epics are IG Daily Funded Bet (DFB) epics — VERIFY each one in
+# your account (GET /markets?searchTerm=... or IG platform market info).
+# Live trading reads min size / min stop / expiry / currency from
+# GET /markets/{epic}; the values below are fallbacks + backtest inputs.
+# Run `python -m bot.feasibility` to see which markets your equity can
+# size correctly — trade only those.
+# ---------------------------------------------------------------------
+markets:
+  - name: EURUSD
+    epic: CS.D.EURUSD.TODAY.IP
+    group: fx_usd
+    modules: [trend, meanrev]
+    allow_short: true
+    point_value: 1.0            # GBP per point per 1.0 stake
+    price_scale: 10000          # CSV history 1.0850 -> IG quote 10850
+    min_size: 0.5
+    size_step: 0.01
+    margin_pct: 3.33
+    max_spread_points: 1.5
+    backtest_spread_points: 0.9
+    funding_long_pct: 3.0       # annualised, conservative approximation
+    funding_short_pct: 3.0
+
+  - name: GBPUSD
+    epic: CS.D.GBPUSD.TODAY.IP
+    group: fx_usd
+    modules: [trend, meanrev]
+    allow_short: true
+    point_value: 1.0
+    price_scale: 10000
+    min_size: 1.0
+    size_step: 0.01
+    margin_pct: 3.33
+    max_spread_points: 2.0
+    backtest_spread_points: 1.4
+    funding_long_pct: 3.0
+    funding_short_pct: 3.0
+
+  - name: UK100
+    epic: IX.D.FTSE.DAILY.IP
+    group: equity_index
+    modules: [trend, meanrev]
+    allow_short: false          # equity indices: long-only bias
+    point_value: 1.0
+    price_scale: 1.0
+    min_size: 0.5
+    size_step: 0.01
+    margin_pct: 5.0
+    max_spread_points: 2.0
+    backtest_spread_points: 1.5
+    funding_long_pct: 6.5       # benchmark + 2.5% admin fee, approx
+    funding_short_pct: 2.5
+
+  - name: US500
+    epic: IX.D.SPTRD.DAILY.IP
+    group: equity_index
+    modules: [trend, meanrev]
+    allow_short: false
+    point_value: 1.0
+    price_scale: 1.0
+    min_size: 0.5
+    size_step: 0.01
+    margin_pct: 5.0
+    max_spread_points: 1.5
+    backtest_spread_points: 0.8
+    funding_long_pct: 6.5
+    funding_short_pct: 2.5
+
+  - name: GER40
+    epic: IX.D.DAX.DAILY.IP
+    group: equity_index
+    modules: [trend, meanrev]
+    allow_short: false
+    point_value: 1.0
+    price_scale: 1.0
+    min_size: 0.5
+    size_step: 0.01
+    margin_pct: 5.0
+    max_spread_points: 3.0
+    backtest_spread_points: 2.0
+    funding_long_pct: 6.0
+    funding_short_pct: 2.5
+
+  - name: GOLD
+    epic: CS.D.USCGC.TODAY.IP
+    group: metals
+    modules: [trend]
+    allow_short: true
+    point_value: 1.0
+    price_scale: 1.0
+    min_size: 0.5
+    size_step: 0.01
+    margin_pct: 5.0
+    max_spread_points: 1.0
+    backtest_spread_points: 0.6
+    funding_long_pct: 5.0
+    funding_short_pct: 3.0
+
+# ---------------------------------------------------------------------
+# Strategy parameters (see STRATEGY.md). Change only via the
+# strategy-change protocol in AGENTS.md.
+# ---------------------------------------------------------------------
+strategy:
+  regime:
+    adx_len: 14
+    adx_trend: 22        # ADX >= 22 -> TREND regime
+    adx_range: 18        # ADX <= 18 -> RANGE regime; in between -> no entries
+  volatility:
+    atr_len: 14
+    lookback: 250
+    low_pctile: 5        # skip dead markets (spread eats the edge)
+    high_pctile: 95      # skip shock volatility (news spikes)
+  trend:
+    ema_fast: 20
+    ema_mid: 50
+    ema_slow: 200
+    donchian_len: 20
+    pullback_lookback: 3
+    rsi_len: 14
+    rsi_long_min: 50
+    rsi_long_max: 75     # shorts mirror: 25..50
+    macd_fast: 12
+    macd_slow: 26
+    macd_signal: 9
+    min_score: 5         # of 6 (bias + trigger mandatory)
+    stop_atr: 2.0
+    trail_atr: 3.0
+  meanrev:
+    bb_len: 20
+    bb_std: 2.0
+    rsi_fast_len: 2
+    rsi_fast_entry: 10   # long when RSI(2) < 10 (short when > 90)
+    rsi_fast_exit: 70    # long exits when RSI(2) > 70 (short when < 30)
+    rsi_slow_max: 40     # long needs RSI(14) < 40 (short needs > 60)
+    stop_atr: 2.5
+    max_bars: 6          # time stop
+
+# ---------------------------------------------------------------------
+# Risk — ceilings. Do not loosen.
+# ---------------------------------------------------------------------
+risk:
+  risk_per_trade_pct: 1.0
+  max_open_positions: 3
+  max_positions_per_group: 1
+  max_total_open_risk_pct: 3.0
+  max_margin_utilisation_pct: 50
+  daily_loss_limit_pct: 3.0
+  weekly_loss_limit_pct: 6.0
+  max_drawdown_halt_pct: 15.0     # from equity peak -> close all, halt, manual reset
+  loss_streak_halve_risk: 4       # risk halves after 4 straight losses (until a win)
+  loss_streak_pause: 6            # 6 straight losses -> pause new entries
+  pause_hours: 48
+
+# ---------------------------------------------------------------------
+# Safety — do not loosen.
+# ---------------------------------------------------------------------
+safety:
+  live_trading_confirmed: false   # LIVE also needs IG_ENV=LIVE and --live flag
+  live_full_risk_approved: false  # false -> LIVE risk capped at promotion.live_initial_risk_per_trade_pct
+  dry_run: true                   # true = log orders, send nothing
+  kill_file: KILL                 # touch KILL -> close bot positions, halt
+  pause_file: PAUSE               # touch PAUSE -> no new entries
+  friday_cutoff_utc: "16:00"      # no new entries after this on Fridays
+  max_orders_per_day: 8
+  poll_seconds: 60
+
+backtest:
+  initial_equity: 2000
+  slippage_frac_of_spread: 0.25   # extra slippage per fill = 0.25 x spread (spreads above are already padded)
+  oos_fraction: 0.3               # last 30% of the period is out-of-sample
+
+promotion:
+  backtest_min_trades: 100
+  backtest_min_profit_factor: 1.3
+  backtest_max_drawdown_pct: 20
+  oos_min_profit_factor: 1.15
+  demo_min_weeks: 6
+  demo_min_trades: 30
+  live_initial_risk_per_trade_pct: 0.5
