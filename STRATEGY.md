@@ -170,7 +170,7 @@ Never "fix" this by rounding the stake up or tightening stops below 2×ATR to ma
 
 - Decisions are made on bar close and orders go out as market orders immediately after. The backtest fills at the next bar's open.
 - Every order carries `stopDistance` (server-side). Orders without one are refused in code.
-- The spread filter skips an entry when the live spread is above `max_spread_points` (out-of-hours spreads).
+- The spread filter skips an entry when the live spread is above the market's `max_spread_points`, **or** costs more than 10% of the stop distance (`safety.max_spread_pct_of_stop`).
 - The bot manages only positions it opened. Manual positions are ignored.
 
 ## 10. What this strategy is NOT
