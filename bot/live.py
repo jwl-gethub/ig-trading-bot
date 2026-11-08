@@ -407,11 +407,14 @@ class LiveRunner:
             return reject("PAUSE_SWITCH")
         if not info.tradeable:
             return reject("MARKET_NOT_TRADEABLE")
-        if info.spread > mkt["max_spread_points"]:
+        if mkt.get("max_spread_points") is not None and info.spread > mkt["max_spread_points"]:
             return reject(f"SPREAD_WIDE {info.spread:.2f} > {mkt['max_spread_points']}")
         positions = list(self.positions.values())
         s_eq = self.sleeves.equity(sleeve, positions, self.prices())
         stop_dist = max(sig.stop_distance, info.min_stop_distance * 1.05)
+        pct_cap = self.cfg["safety"].get("max_spread_pct_of_stop")
+        if pct_cap and info.spread > stop_dist * pct_cap / 100:
+            return reject(f"SPREAD_TOO_COSTLY {info.spread:.2f} > {pct_cap}% of stop {stop_dist:.1f}")
         room = self.sleeves.max_size_by_leverage(sleeve, s_eq, positions, info.mid, mkt["point_value"])
         sz = self.risk.size(s_eq, stop_dist, mkt["point_value"], info.min_size, mkt["size_step"],
                             risk_pct=self.sleeves.risk_pct(sleeve), max_size=room)

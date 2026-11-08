@@ -17,6 +17,7 @@ def test_runs_and_reports(cfg):
 
 
 def test_small_account_skips_unsizeable(cfg):
+    cfg["markets"] = [m for m in cfg["markets"] if m["name"] in ("EURUSD", "GBPUSD", "UK100", "US500", "GER40", "GOLD")]
     data = synthetic_universe(cfg["markets"], 1200, regimes=True)
     res = Backtester(cfg, data, 300).run()
     assert res.rejections.get("UNSIZEABLE", 0) > 0

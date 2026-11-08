@@ -284,3 +284,15 @@ def test_refuses_to_trade_on_wrong_account_type(cfg, make_broker, tmp_path):
     with pytest.raises(SafetyError, match="ACCOUNT_TYPE_MISMATCH"):
         r.startup(broker.now)
     assert broker.orders == []
+
+
+def test_spread_rule_relative_to_stop(cfg, make_broker, tmp_path):
+    cfg = _cfg3(cfg)
+    for m in cfg["markets"]:
+        m["max_spread_points"] = None          # only the % rule applies
+    broker = make_broker(cfg, equity=100_000, spread=10_000.0)   # absurd spread
+    r, start = _runner(cfg, broker, tmp_path, dry_run=False)
+    _run(r, broker, start, 200)
+    assert broker.orders == []
+    events = [json.loads(x) for x in (tmp_path / "logs" / "decisions.jsonl").read_text().splitlines()]
+    assert any(str(e.get("reason", "")).startswith("SPREAD_TOO_COSTLY") for e in events)

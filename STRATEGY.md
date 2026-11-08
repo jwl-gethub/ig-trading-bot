@@ -15,8 +15,8 @@ This is the source of truth for trading logic. `bot/strategy.py` implements it, 
 |---|---|
 | Account | IG spread betting (GBP per point) |
 | Bars | 4-hour (`HOUR_4`), closed bars only |
-| Universe | EURUSD, GBPUSD, UK100, US500, GER40, GOLD (DFB epics in `config.yaml`) |
-| Correlation groups | `fx_usd`, `equity_index`, `metals`: max 1 open position per group |
+| Universe | EURUSD, GBPUSD, UK100, US500, GER40, GOLD, SILVER, COPPER (DFB epics in `config.yaml`) |
+| Correlation groups | `fx_usd`, `equity_index`, `metals` (gold, silver), `industrial_metals` (copper). Each sleeve holds at most 1 per group |
 
 Trade only the markets that `python -m bot.feasibility` marks **OK** for your equity (see §8).
 

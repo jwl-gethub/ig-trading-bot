@@ -112,6 +112,39 @@ markets:
     funding_long_pct: 5.0
     funding_short_pct: 3.0
 
+  - name: SILVER
+    epic: CS.D.USCSI.TODAY.IP     # Spot Silver DFB (found via IG market search, 2026-11-08)
+    group: metals                 # same group as gold: a sleeve holds one of them at a time
+    modules: [trend, sweep]
+    allow_short: true
+    point_value: 1.0
+    price_scale: 1.0
+    min_size: 0.5                 # fallback only; live reads IG's dealing rules
+    size_step: 0.01
+    margin_pct: 10.0              # FCA retail limit for non-gold commodities (10:1)
+    max_spread_points: null       # unknown yet: rely on safety.max_spread_pct_of_stop
+    backtest_spread_points: 3.0   # estimate; replace with the live spread once seen
+    funding_long_pct: 5.0
+    funding_short_pct: 3.0
+
+  - name: COPPER
+    epic: CS.D.COPPER.TODAY.IP    # Copper DFB (found via IG market search, 2026-11-08)
+    group: industrial_metals
+    modules: [trend, sweep]
+    allow_short: true
+    point_value: 1.0
+    price_scale: 1.0
+    min_size: 0.5
+    size_step: 0.01
+    margin_pct: 10.0
+    max_spread_points: null
+    backtest_spread_points: 3.0
+    funding_long_pct: 5.0
+    funding_short_pct: 3.0
+
+# Palladium: IG has no undated spot market, only dated futures (expiring contracts).
+# Not added until the bot handles contract rollover.
+
 # ---------------------------------------------------------------------
 # Strategy parameters (see STRATEGY.md). Change only via the
 # strategy-change protocol in AGENTS.md.
@@ -225,6 +258,7 @@ safety:
   kill_file: KILL                 # touch KILL -> close bot positions, halt
   pause_file: PAUSE               # touch PAUSE -> no new entries
   friday_cutoff_utc: "16:00"      # no new entries after this on Fridays
+  max_spread_pct_of_stop: 10      # skip an entry if the live spread costs > 10% of the stop distance
   max_orders_per_day: 8
   poll_seconds: 60
 
