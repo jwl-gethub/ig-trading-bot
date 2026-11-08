@@ -476,7 +476,21 @@ class LiveRunner:
         self.reconcile(now)
         self.event("SLEEVES", **self.sleeve_summary())
         self.log_feasibility()
+        self.log_market_search()
         self.save_state()
+
+    def log_market_search(self) -> None:
+        """BOT_SEARCH_MARKETS=silver,copper logs IG's matching instruments (spread-bet DFB first). No trading effect."""
+        terms = [t.strip() for t in os.environ.get("BOT_SEARCH_MARKETS", "").split(",") if t.strip()]
+        if not terms or not hasattr(self.broker, "search_markets"):
+            return
+        for term in terms:
+            try:
+                found = self.broker.search_markets(term)
+                found.sort(key=lambda m: (m.get("expiry") != "DFB", m.get("name") or ""))
+                self.event("MARKET_SEARCH", term=term, results=found[:15])
+            except Exception as exc:
+                self.event("MARKET_SEARCH_ERROR", term=term, error=repr(exc))
 
     def log_feasibility(self) -> None:
         """Log, per market, whether current equity can size a trade within the risk cap."""

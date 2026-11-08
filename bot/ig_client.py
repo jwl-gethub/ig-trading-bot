@@ -12,6 +12,7 @@ Endpoints used (header `Version` in brackets):
   POST /positions/otc [1] + `_method: DELETE`   close position
   GET  /confirms/{dealReference} [1] deal confirmation
   GET  /clientsentiment/{marketId} [1] % of IG clients long/short (recorded, not traded on)
+  GET  /markets?searchTerm=... [1]   find epics when adding markets
 
 Published limits (LIVE; demo can be lower): 30 non-trading req/min per account,
 60 per app, 100 trading req/min per account, 10,000 historical price points per week.
@@ -184,6 +185,13 @@ class IGClient:
             currency=currency,
             market_id=inst.get("marketId") or "",
         )
+
+    def search_markets(self, term: str) -> list[dict]:
+        """GET /markets?searchTerm=... : find the epic for an instrument (used to configure new markets)."""
+        d = self._request("GET", "/markets", 1, params={"searchTerm": term}).json()
+        return [{"epic": m.get("epic"), "name": m.get("instrumentName"), "expiry": m.get("expiry"),
+                 "type": m.get("instrumentType"), "status": m.get("marketStatus")}
+                for m in d.get("markets", [])]
 
     def client_sentiment(self, market_id: str) -> dict:
         """% of IG clients long/short on a market (current snapshot only; no history)."""

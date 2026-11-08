@@ -112,3 +112,12 @@ def test_open_position_sends_limit_when_given():
     c = client({("POST", "/positions/otc"): h,
                 ("GET", "/confirms/R9"): Resp(200, {"dealStatus": "ACCEPTED", "dealId": "D9", "limitLevel": 120})})
     assert c.open_position("X", "BUY", 1.0, 10.0, "DFB", "GBP", limit_distance=20.0)["limit_level"] == 120
+
+
+def test_search_markets_parsing():
+    body = {"markets": [{"epic": "CS.D.USCSI.TODAY.IP", "instrumentName": "Spot Silver", "expiry": "DFB",
+                         "instrumentType": "COMMODITIES", "marketStatus": "EDITS_ONLY"}]}
+    c = client({("GET", "/markets"): Resp(200, body)})
+    res = c.search_markets("silver")
+    assert res == [{"epic": "CS.D.USCSI.TODAY.IP", "name": "Spot Silver", "expiry": "DFB",
+                    "type": "COMMODITIES", "status": "EDITS_ONLY"}]
