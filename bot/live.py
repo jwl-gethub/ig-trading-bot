@@ -15,6 +15,7 @@ Human switches (env vars, e.g. Railway Variables; changing one redeploys):
     BOT_RESET_HALT=<code>    clear a halt using the code printed in the logs
     BOT_MARKETS=EURUSD,GOLD  trade only these markets
     BOT_ENABLE_SEGMENTS=EURUSD:meanrev   re-enable a segment the learning loop switched off
+    BOT_RESET_SLEEVES=leveraged          resume a sleeve that hit its own drawdown limit
     STATE_DIR / LOG_DIR      where state, bar cache and logs live (a persistent volume)
 
 Every decision is written to logs/decisions.jsonl; closed trades to logs/trades.csv.
@@ -40,6 +41,7 @@ from .ig_client import IGClient, SafetyError
 from .feasibility import feasibility_row
 from .indicators import compute_all, true_range
 from .risk import RiskManager, RiskState
+from .sleeves import Sleeves, sleeve_key
 from .learning import append_journal, journal_record, load_journal, review
 from .learning import settings as learning_settings
 from .strategy import PositionState, Strategy, entry_features
@@ -158,6 +160,8 @@ class LiveRunner:
         self.bars: dict[str, pd.DataFrame] = {}
         self.unmanaged_seen: set[str] = set()
         self.risk = RiskManager(cfg["risk"], cfg["safety"])
+        self.sleeves = Sleeves(cfg)
+        self._info_cache: dict[str, tuple] = {}
         self._load_state()
 
     # ---------------- persistence & logging
@@ -169,11 +173,18 @@ class LiveRunner:
         if self._state_file.exists():
             d = json.loads(self._state_file.read_text())
             self.risk.state = RiskState(**d.get("risk", {}))
-            self.positions = {k: PositionState(**v) for k, v in d.get("positions", {}).items()}
+            self.sleeves = Sleeves(self.cfg, d.get("sleeves"))
+            self.positions = {}
+            for k, v in d.get("positions", {}).items():
+                pos = PositionState(**v)
+                if not pos.sleeve:   # state written before sleeves existed
+                    pos.sleeve = self.sleeves.by_module.get(pos.module, self.sleeves.names()[0])
+                self.positions[sleeve_key(pos.sleeve, pos.market)] = pos
             self.last_bar = d.get("last_bar", {})
 
     def save_state(self) -> None:
         d = {"risk": self.risk.state.to_dict(),
+             "sleeves": self.sleeves.to_dict(),
              "positions": {k: v.to_dict() for k, v in self.positions.items()},
              "last_bar": self.last_bar}
         tmp = self._state_file.with_suffix(".tmp")
@@ -200,8 +211,14 @@ class LiveRunner:
         rec = journal_record(pos, exit_px, now, reason, pnl)
         append_journal(self.log_dir / "trades.jsonl", rec)
         self.event("TRADE_JOURNAL", **{k: v for k, v in rec.items() if k != "features"})
-        self.risk.on_trade_closed(pnl, now)
+        self.sleeves.on_trade_closed(pos.sleeve, pnl, now)
         return pnl
+
+    def prices(self) -> dict[str, float]:
+        return {m: float(df["close"].iloc[-1]) for m, df in self.bars.items() if len(df)}
+
+    def sleeve_summary(self) -> dict:
+        return self.sleeves.summary(self.positions.values(), self.prices())
 
     # ---------------- learning loop
     def maybe_learn(self, now, force: bool = False) -> dict | None:
@@ -222,7 +239,7 @@ class LiveRunner:
         (self.log_dir / "learning_report.json").write_text(json.dumps(rep, indent=2, default=str))
         self.event("LEARNING_REPORT", week=week, trades=rep["trades"], overall=rep.get("overall"),
                    findings=rep["findings"], suggestions=rep["suggestions"], disabled_now=rep["disable"],
-                   disabled_total=list(self.risk.state.disabled_segments))
+                   disabled_total=list(self.risk.state.disabled_segments), sleeves=self.sleeve_summary())
         self.save_state()
         return rep
 
@@ -281,27 +298,28 @@ class LiveRunner:
         if self.dry_run:
             return
         ig = {p["deal_id"]: p for p in self.broker.open_positions()}
-        for name, pos in list(self.positions.items()):
+        for key, pos in list(self.positions.items()):
             if pos.deal_id not in ig:
-                exit_px, how = self._estimate_server_exit(name, pos)
+                exit_px, how = self._estimate_server_exit(pos)
                 pnl = self._journal(pos, exit_px, how, now)
-                self.event("POSITION_GONE", market=name, deal_id=pos.deal_id, pnl_est=round(pnl, 2),
-                           assumed=how, note="estimated from stop/target levels; verify in IG history")
-                del self.positions[name]
+                self.event("POSITION_GONE", market=pos.market, sleeve=pos.sleeve, deal_id=pos.deal_id,
+                           pnl_est=round(pnl, 2), assumed=how,
+                           note="estimated from stop/target levels; verify in IG history")
+                del self.positions[key]
             elif ig[pos.deal_id]["stop_level"] is None:
-                self.event("MISSING_STOP", market=name, deal_id=pos.deal_id)
+                self.event("MISSING_STOP", market=pos.market, sleeve=pos.sleeve, deal_id=pos.deal_id)
                 res = self.broker.update_stop(pos.deal_id, pos.stop_level)
                 if res.get("status") != "ACCEPTED":
-                    self._close(name, "emergency_no_stop", now)
+                    self._close(key, "emergency_no_stop", now)
         ours = {p.deal_id for p in self.positions.values()}
         for deal_id, p in ig.items():
             if deal_id not in ours and deal_id not in self.unmanaged_seen:
                 self.unmanaged_seen.add(deal_id)
                 self.event("UNMANAGED_POSITION_IGNORED", deal_id=deal_id, epic=p["epic"])
 
-    def _estimate_server_exit(self, name: str, pos: PositionState) -> tuple[float, str]:
+    def _estimate_server_exit(self, pos: PositionState) -> tuple[float, str]:
         """IG closed it (stop or limit hit). Use the latest bar to judge which one."""
-        df = self.bars.get(name)
+        df = self.bars.get(pos.market)
         if pos.target_level is not None and df is not None and len(df):
             bar = df.iloc[-1]
             reached = bar["high"] >= pos.target_level if pos.direction == 1 else bar["low"] <= pos.target_level
@@ -310,40 +328,42 @@ class LiveRunner:
         return pos.stop_level, "stop_server_side"
 
     # ---------------- actions
-    def _close(self, name: str, reason: str, now) -> None:
-        pos = self.positions[name]
+    def _close(self, key: str, reason: str, now) -> None:
+        pos = self.positions[key]
         if self.dry_run:
-            self.event("DRY_RUN_CLOSE", market=name, reason=reason)
-            del self.positions[name]
+            self.event("DRY_RUN_CLOSE", market=pos.market, sleeve=pos.sleeve, reason=reason)
+            del self.positions[key]
             return
         res = self.broker.close_position(pos.deal_id, "BUY" if pos.direction == 1 else "SELL", pos.size)
         if res.get("status") == "ACCEPTED":
-            px = float(res.get("level") or self.bars[name]["close"].iloc[-1])
+            px = float(res.get("level") or self.bars[pos.market]["close"].iloc[-1])
             pnl = self._journal(pos, px, reason, now)
-            self.event("CLOSED", market=name, reason=reason, level=px, pnl_est=round(pnl, 2))
-            del self.positions[name]
+            self.event("CLOSED", market=pos.market, sleeve=pos.sleeve, reason=reason, level=px,
+                       pnl_est=round(pnl, 2))
+            del self.positions[key]
         else:
-            self.event("CLOSE_REJECTED", market=name, reason=res.get("reason"))
+            self.event("CLOSE_REJECTED", market=pos.market, sleeve=pos.sleeve, reason=res.get("reason"))
 
     def kill_all(self, reason: str, now) -> None:
         self.event("KILL_ALL", reason=reason, positions=list(self.positions))
-        for name in list(self.positions):
-            self._close(name, f"kill:{reason}", now)
+        for key in list(self.positions):
+            self._close(key, f"kill:{reason}", now)
         self.risk.halt(reason)
         self.save_state()
 
-    def _manage(self, name: str, row: dict, now) -> None:
-        pos = self.positions[name]
+    def _manage(self, key: str, row: dict, now) -> None:
+        pos = self.positions[key]
+        name = pos.market
         dec = self.strategy.manage(pos, row)
         if dec.close:
-            self._close(name, dec.reason, now)
+            self._close(key, dec.reason, now)
         elif dec.new_stop is not None:
             if self.dry_run:
                 pos.stop_level = dec.new_stop
                 return
             res = self.broker.update_stop(pos.deal_id, round(dec.new_stop, 2))
             if res.get("status") == "ACCEPTED":
-                self.event("STOP_MOVED", market=name, old=pos.stop_level, new=dec.new_stop)
+                self.event("STOP_MOVED", market=name, sleeve=pos.sleeve, old=pos.stop_level, new=dec.new_stop)
                 pos.stop_level = dec.new_stop
             else:
                 self.event("STOP_UPDATE_REJECTED", market=name, reason=res.get("reason"))
@@ -357,20 +377,29 @@ class LiveRunner:
             self.event("SENTIMENT_ERROR", market_id=info.market_id, error=repr(exc))
             return None
 
-    def _try_entry(self, name: str, row: dict, equity: float, now) -> None:
+    def _market_context(self, epic: str):
+        """market_info + sentiment, fetched at most once per market per cycle."""
+        if epic not in self._info_cache:
+            info = self.broker.market_info(epic)
+            self._info_cache[epic] = (info, self._sentiment(info))
+        return self._info_cache[epic]
+
+    def _try_entry(self, name: str, sleeve: str, row: dict, equity: float, now) -> None:
         mkt = self.mkts[name]
-        sig = self.strategy.entry_signal(mkt, row)
+        mods = self.sleeves.modules_for(sleeve, mkt["modules"])
+        if not mods:
+            return
+        sig = self.strategy.entry_signal({**mkt, "modules": mods}, row)
         if not sig:
             return
-        info = self.broker.market_info(mkt["epic"])
-        crowd_long = self._sentiment(info)
+        info, crowd_long = self._market_context(mkt["epic"])
         spread = info.spread if info.spread == info.spread else None
-        features = entry_features(sig, row, now, crowd_long_pct=crowd_long, spread=spread)
-        self.event("SIGNAL", market=name, direction=sig.direction, module=sig.module, score=sig.score,
-                   conditions=sig.conditions, crowd_long_pct=crowd_long, snapshot=sig.snapshot)
+        features = entry_features(sig, row, now, crowd_long_pct=crowd_long, spread=spread, sleeve=sleeve)
+        self.event("SIGNAL", market=name, sleeve=sleeve, direction=sig.direction, module=sig.module,
+                   score=sig.score, conditions=sig.conditions, crowd_long_pct=crowd_long, snapshot=sig.snapshot)
 
         def reject(why: str) -> None:
-            self.event("ENTRY_REJECTED", market=name, module=sig.module, reason=why)
+            self.event("ENTRY_REJECTED", market=name, sleeve=sleeve, module=sig.module, reason=why)
 
         if f"{name}:{sig.module}" in self.risk.state.disabled_segments:
             return reject("LEARNED_DISABLED")
@@ -380,17 +409,26 @@ class LiveRunner:
             return reject("MARKET_NOT_TRADEABLE")
         if info.spread > mkt["max_spread_points"]:
             return reject(f"SPREAD_WIDE {info.spread:.2f} > {mkt['max_spread_points']}")
+        positions = list(self.positions.values())
+        s_eq = self.sleeves.equity(sleeve, positions, self.prices())
         stop_dist = max(sig.stop_distance, info.min_stop_distance * 1.05)
-        sz = self.risk.size(equity, stop_dist, mkt["point_value"], info.min_size, mkt["size_step"])
+        room = self.sleeves.max_size_by_leverage(sleeve, s_eq, positions, info.mid, mkt["point_value"])
+        sz = self.risk.size(s_eq, stop_dist, mkt["point_value"], info.min_size, mkt["size_step"],
+                            risk_pct=self.sleeves.risk_pct(sleeve), max_size=room)
         if not sz.ok:
             return reject(sz.reason)
-        margin = sz.size * info.mid * mkt["point_value"] * mkt["margin_pct"] / 100
+        ok, why = self.sleeves.check(sleeve, now, name, mkt["group"], positions)
+        if not ok:
+            return reject(why)
+        notional = sz.size * info.mid * mkt["point_value"]
+        margin = notional * mkt["margin_pct"] / 100
         prov = PositionState(market=name, direction=sig.direction, module=sig.module, entry_price=info.mid,
                              stop_level=info.mid - sig.direction * stop_dist, size=sz.size,
                              point_value=mkt["point_value"], initial_risk_points=stop_dist,
                              entry_ts=str(now), extreme=info.mid, margin=margin, group=mkt["group"],
-                             features=features)
-        ok, why = self.risk.check_entry(now, mkt, list(self.positions.values()), equity, sz.risk_amount, margin)
+                             sleeve=sleeve, notional=notional, features=features)
+        ok, why = self.risk.check_entry(now, mkt, positions, equity, sz.risk_amount, margin, notional,
+                                        sleeve=sleeve)
         if not ok:
             return reject(why)
 
@@ -402,22 +440,25 @@ class LiveRunner:
             order["limit_distance"] = round(target_dist, 1)
         assert_order_safe(order)
         if self.dry_run:
-            self.event("DRY_RUN_ORDER", market=name, risk=round(sz.risk_amount, 2), **order)
+            self.event("DRY_RUN_ORDER", market=name, sleeve=sleeve, risk=round(sz.risk_amount, 2),
+                       sleeve_equity=round(s_eq, 2), **order)
             return
         self.risk.on_order_sent()
         res = self.broker.open_position(**order)
         if res.get("status") != "ACCEPTED":
-            return self.event("ORDER_REJECTED", market=name, reason=res.get("reason"), order=order)
+            return self.event("ORDER_REJECTED", market=name, sleeve=sleeve, reason=res.get("reason"), order=order)
         level = float(res.get("level") or info.mid)
         prov.entry_price = level
         prov.extreme = level
+        prov.notional = sz.size * level * mkt["point_value"]
         prov.stop_level = float(res.get("stop_level") or level - sig.direction * stop_dist)
         if target_dist:
             prov.target_level = float(res.get("limit_level") or level + sig.direction * target_dist)
         prov.deal_id = res["deal_id"]
-        self.positions[name] = prov
-        self.event("OPENED", market=name, deal_id=prov.deal_id, level=level, stop=prov.stop_level,
-                   size=sz.size, risk=round(sz.risk_amount, 2))
+        self.positions[sleeve_key(sleeve, name)] = prov
+        self.event("OPENED", market=name, sleeve=sleeve, module=sig.module, deal_id=prov.deal_id, level=level,
+                   stop=prov.stop_level, target=prov.target_level, size=sz.size, risk=round(sz.risk_amount, 2),
+                   sleeve_equity=round(s_eq, 2), exposure_x=round(notional / s_eq, 2) if s_eq else None)
 
     # ---------------- switches
     def kill_requested(self) -> bool:
@@ -430,16 +471,18 @@ class LiveRunner:
     def startup(self, now: pd.Timestamp | None = None) -> None:
         now = now or pd.Timestamp.now(tz="UTC")
         self.broker.login()
+        self.sleeves.ensure_bases(self.broker.equity())
         self.warm_up(now)
         self.reconcile(now)
+        self.event("SLEEVES", **self.sleeve_summary())
         self.log_feasibility()
         self.save_state()
 
     def log_feasibility(self) -> None:
         """Log, per market, whether current equity can size a trade within the risk cap."""
         try:
-            equity = self.broker.equity()
             t = self.cfg["strategy"]["trend"]
+            positions = list(self.positions.values())
             for name, mkt in self.mkts.items():
                 df = self.bars.get(name)
                 if df is None or len(df) < 30:
@@ -448,14 +491,17 @@ class LiveRunner:
                 a = float(compute_all(df, self.cfg["strategy"])["atr"].iloc[-1])
                 stop = max(t["stop_atr"] * a, info.min_stop_distance * 1.05)
                 spread = info.spread if info.spread == info.spread else None   # NaN when market closed
-                row = feasibility_row(name, equity, self.risk.current_risk_pct(), info.min_size, stop,
-                                      mkt["point_value"], spread)
                 tail = df.tail(60)
                 tr = true_range(tail).iloc[1:]
-                self.event("FEASIBILITY", equity=round(equity, 2), atr=round(a, 2),
-                           median_tr_60=round(float(tr.median()), 2), max_tr_60=round(float(tr.max()), 2),
-                           max_tr_bar=str(tr.idxmax()), last_close=round(float(tail["close"].iloc[-1]), 2),
-                           bars=len(df), first_bar=str(df.index[0]), **row)
+                for sn in self.sleeves.names():
+                    if not self.sleeves.modules_for(sn, mkt["modules"]):
+                        continue
+                    s_eq = self.sleeves.equity(sn, positions, self.prices())
+                    row = feasibility_row(name, s_eq, self.sleeves.risk_pct(sn), info.min_size, stop,
+                                          mkt["point_value"], spread)
+                    self.event("FEASIBILITY", sleeve=sn, sleeve_equity=round(s_eq, 2), atr=round(a, 2),
+                               median_tr_60=round(float(tr.median()), 2), max_tr_60=round(float(tr.max()), 2),
+                               max_tr_bar=str(tr.idxmax()), bars=len(df), **row)
         except Exception as exc:  # informational only; never block trading startup
             self.event("FEASIBILITY_ERROR", error=repr(exc))
 
@@ -477,12 +523,19 @@ class LiveRunner:
         updated = self.refresh(now)
         if not updated:
             return True
+        self._info_cache = {}
         equity = self.broker.equity()
         self.risk.on_bar(now, equity)
         if self.risk.state.halted:
             self.kill_all(self.risk.state.halt_reason, now)
             return False
         self.reconcile(now)
+        prices = self.prices()
+        for sn in self.sleeves.names():
+            why = self.sleeves.update(sn, self.sleeves.equity(sn, self.positions.values(), prices), now)
+            if why:
+                self.event("SLEEVE_HALTED", sleeve=sn, reason=why,
+                           note="no new entries for this sleeve; open trades still managed; reset via BOT_RESET_SLEEVES")
 
         for name in updated:
             df = self.bars[name]
@@ -490,10 +543,11 @@ class LiveRunner:
                 self.event("NOT_ENOUGH_BARS", market=name, bars=len(df))
                 continue
             row = compute_all(df, self.cfg["strategy"]).iloc[-1].to_dict()
-            if name in self.positions:
-                self._manage(name, row, now)
-            else:
-                self._try_entry(name, row, equity, now)
+            for key in [k for k, p in self.positions.items() if p.market == name]:
+                self._manage(key, row, now)
+            for sn in self.sleeves.names():
+                if sleeve_key(sn, name) not in self.positions:
+                    self._try_entry(name, sn, row, equity, now)
         self.save_state()
         return True
 
@@ -550,6 +604,10 @@ def main(argv: list[str] | None = None) -> None:
             print("halt cleared. Remove the KILL file / BOT_KILL variable too if set.")
             return
 
+    for sn in [x.strip() for x in os.environ.get("BOT_RESET_SLEEVES", "").split(",") if x.strip()]:
+        if sn in runner.sleeves.states and runner.sleeves.states[sn].halted:
+            runner.sleeves.reset(sn)
+            runner.event("SLEEVE_RESET", sleeve=sn, via="env")
     for seg in [x.strip() for x in os.environ.get("BOT_ENABLE_SEGMENTS", "").split(",") if x.strip()]:
         if seg in runner.risk.state.disabled_segments:
             runner.risk.state.disabled_segments.remove(seg)

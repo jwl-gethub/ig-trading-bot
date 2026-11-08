@@ -169,10 +169,12 @@ strategy:
 # Risk — ceilings. Do not loosen.
 # ---------------------------------------------------------------------
 risk:
-  risk_per_trade_pct: 1.0
-  max_open_positions: 3
-  max_positions_per_group: 1
+  risk_per_trade_pct: 1.0         # used only if no sleeves are configured
+  max_trade_risk_pct: 2.0         # ceiling for ANY single trade, % of the whole account
+  max_open_positions: 5           # across all sleeves
+  max_positions_per_group: 3      # across all sleeves (each sleeve has its own limit too)
   max_total_open_risk_pct: 3.0
+  max_total_leverage: 5           # total exposure of all open trades <= 5 x account equity
   max_margin_utilisation_pct: 50
   daily_loss_limit_pct: 3.0
   weekly_loss_limit_pct: 6.0
@@ -180,6 +182,38 @@ risk:
   loss_streak_halve_risk: 4       # risk halves after 4 straight losses (until a win)
   loss_streak_pause: 6            # 6 straight losses -> pause new entries
   pause_hours: 48
+
+# ---------------------------------------------------------------------
+# Strategy sleeves (bot/sleeves.py): independent virtual pots in one account.
+# weight = share of the starting balance (0.10 of £10,000 = £1,000).
+# Each sleeve sizes from its own equity; account-wide limits above still apply.
+# weight x risk_per_trade_pct must stay <= risk.max_trade_risk_pct.
+# ---------------------------------------------------------------------
+sleeves:
+  leveraged:                  # small pot, up to 20:1, running the sweep & reclaim setup
+    modules: [sweep]
+    weight: 0.10              # £1,000
+    risk_per_trade_pct: 10.0  # of the sleeve = £100 = 1% of the whole account
+    max_leverage: 20          # sleeve exposure <= 20 x sleeve equity
+    max_open_positions: 1
+    max_positions_per_group: 1
+    max_drawdown_pct: 50      # stops opening trades after losing half the sleeve
+  trend:
+    modules: [trend]
+    weight: 0.45              # £4,500
+    risk_per_trade_pct: 1.0
+    max_leverage: 3
+    max_open_positions: 2
+    max_positions_per_group: 1
+    max_drawdown_pct: 20
+  meanrev:
+    modules: [meanrev]
+    weight: 0.45              # £4,500
+    risk_per_trade_pct: 1.0
+    max_leverage: 3
+    max_open_positions: 2
+    max_positions_per_group: 1
+    max_drawdown_pct: 20
 
 # ---------------------------------------------------------------------
 # Safety — do not loosen.

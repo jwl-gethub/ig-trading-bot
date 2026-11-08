@@ -30,7 +30,7 @@ DEFAULTS = {
     "sentiment_crowd_threshold": 60,
 }
 SEGMENTS = [
-    ("segment",), ("market",), ("module",), ("regime",), ("score",), ("crowd",),
+    ("sleeve",), ("segment",), ("market",), ("module",), ("regime",), ("score",), ("crowd",),
     ("session",), ("weekday",), ("exit_reason",), ("module", "crowd"),
 ]
 
@@ -48,7 +48,8 @@ def journal_record(pos, exit_px: float, exit_ts, reason: str, pnl: float) -> dic
     mae = max(pos.mae_pts, -move, 0.0)
     init_risk = risk_pts * pos.size * pos.point_value
     return {
-        "market": pos.market, "module": pos.module, "direction": pos.direction,
+        "sleeve": getattr(pos, "sleeve", ""), "market": pos.market, "module": pos.module,
+        "direction": pos.direction,
         "segment": f"{pos.market}:{pos.module}",
         "entry_ts": str(pos.entry_ts), "exit_ts": str(exit_ts),
         "entry": round(pos.entry_price, 5), "exit": round(exit_px, 5), "size": pos.size,
@@ -102,6 +103,9 @@ def enrich(df: pd.DataFrame, s: dict) -> pd.DataFrame:
     if df.empty:
         return df
     df = df.copy()
+    if "sleeve" not in df:
+        df["sleeve"] = ""
+    df["sleeve"] = df["sleeve"].fillna("")
     feats = df["features"].apply(lambda f: f if isinstance(f, dict) else {})
     for key in ("regime", "score", "hour_utc", "weekday", "crowd_long_pct"):
         df[key] = feats.apply(lambda f, k=key: f.get(k))

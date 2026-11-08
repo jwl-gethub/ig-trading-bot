@@ -72,6 +72,7 @@ def test_backtest_trades_carry_learning_features(cfg):
 def test_sweep_trades_use_targets(cfg):
     import copy
     cfg = copy.deepcopy(cfg)
+    cfg.pop("sleeves", None)          # one pot, so the module gets many trades
     for m in cfg["markets"]:
         m["modules"] = ["sweep"]
     data = synthetic_universe(cfg["markets"], 3000, regimes=True)
@@ -86,6 +87,7 @@ def test_sweep_trades_use_targets(cfg):
 def test_sweep_has_no_edge_on_random_walk(cfg):
     import copy
     cfg = copy.deepcopy(cfg)
+    cfg.pop("sleeves", None)
     cfg["risk"]["max_drawdown_halt_pct"] = 25
     for m in cfg["markets"]:
         m["modules"] = ["sweep"]
@@ -96,3 +98,18 @@ def test_sweep_has_no_edge_on_random_walk(cfg):
     r = np.array(rs)
     assert len(r) > 150
     assert r.mean() < 0.05, f"suspicious edge on random data: avg R {r.mean():.3f}"
+
+
+def test_backtest_runs_sleeves_independently(cfg):
+    from bot.backtest import sleeve_report
+    data = synthetic_universe(cfg["markets"], 2000, regimes=True)
+    res = Backtester(cfg, data, 10_000).run()
+    owners = {sn: set(spec["modules"]) for sn, spec in cfg["sleeves"].items()}
+    assert res.trades
+    for t in res.trades:
+        assert t.module in owners[t.sleeve]                 # each sleeve trades only its own strategy
+    rep = sleeve_report(res)
+    assert set(rep) == set(cfg["sleeves"])
+    assert rep["leveraged"]["start"] == 1_000 and rep["trend"]["start"] == 4_500
+    total_sleeves = sum(r["net_profit"] for r in rep.values() if "net_profit" in r)
+    assert abs(total_sleeves - (res.equity.iloc[-1] - 10_000)) < 1.0   # sleeve P&L adds up to the account

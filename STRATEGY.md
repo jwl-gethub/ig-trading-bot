@@ -127,6 +127,33 @@ Any market type is allowed (trending, ranging or neutral), because the trend-con
 | Friday after 16:00 UTC | no new entries (weekend gap risk) | – |
 | Live phase 1 | risk capped at 0.5% until the human approves full risk | – |
 
+## 7b. Strategy sleeves (`bot/sleeves.py`, `sleeves:` in config)
+
+The account is split into independent virtual pots, so the strategies don't compete for trade slots and each gets a clean track record:
+
+| Sleeve | Strategy | Share (on £10k) | Risk per trade | Exposure cap | Sleeve stops opening at |
+|---|---|---|---|---|---|
+| leveraged | Sweep & reclaim | 10% (£1,000) | 10% of sleeve (= 1% of account) | 20× sleeve equity | −50% |
+| trend | Trend confluence | 45% (£4,500) | 1% of sleeve | 3× | −20% |
+| meanrev | Range mean reversion | 45% (£4,500) | 1% of sleeve | 3× | −20% |
+
+- Each sleeve sizes from **its own** equity: its slice plus its realised P&L plus its open P&L.
+- If the exposure cap is smaller than the risk-based stake, the stake **shrinks**; it is never enlarged.
+- Each sleeve has its own limits on open trades (leveraged 1, the others 2), one trade per group, and its own loss-streak halving and pause.
+- Two sleeves may hold the same market. IG keeps them as separate positions because orders use `forceOpen`.
+- A sleeve drawdown halt stops only that sleeve's new entries. Its open trades are still managed. To resume it, set `BOT_RESET_SLEEVES=name`.
+- **Account-wide limits still sit on top of all sleeves:**
+  - any single trade risks ≤ 2% of the whole account
+  - total open risk ≤ 3%
+  - total exposure ≤ 5× account
+  - max 5 open trades
+  - the daily and weekly loss limits
+  - the 15% account drawdown halt, which closes everything
+
+**Config validation:** sleeve weights must sum to ≤ 1. Each module belongs to one sleeve only. weight × sleeve risk must be ≤ the 2% per-trade ceiling. Sleeve hard limits: risk ≤ 10% of the sleeve, leverage ≤ 30×, drawdown ≤ 80%.
+
+**Consequence at these sizes:** at 1% of £4,500 (£45 per trade), FTSE 100's minimum stake (about £72 at risk) no longer fits the trend and mean-reversion sleeves. Those sleeves trade FX and gold. The leveraged sleeve (£100 per trade) can still take FTSE sweeps.
+
 ## 8. Small-capital reality
 
 IG's minimum stakes are around £0.50–£1 per point. A 2×ATR stop on 4H bars is typically tens of points on FX, US500 and UK100, and well over a hundred on GER40. The equity needed to trade a market at 1% risk is therefore often **in the low thousands of pounds per market**.

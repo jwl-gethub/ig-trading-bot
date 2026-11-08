@@ -45,6 +45,8 @@ class PositionState:
     deal_id: str | None = None
     margin: float = 0.0
     group: str = ""
+    sleeve: str = ""         # which strategy sleeve owns this position
+    notional: float = 0.0    # size x entry price x point value (exposure, for leverage caps)
     target_level: float | None = None
     mfe_pts: float = 0.0     # max favourable excursion since entry (points)
     mae_pts: float = 0.0     # max adverse excursion since entry (points)

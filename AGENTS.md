@@ -17,8 +17,8 @@ Build and maintain a deterministic, rule-based trading bot for the IG REST API. 
 2. **Every order has a server-side stop** (`stopDistance` or `stopLevel`) at the moment it opens. A code path that can send an order without one is a critical bug.
 3. **Stops only move in the trade's favour.** Never widen or remove a stop. Never convert a stop into a mental or client-side stop.
 4. **No martingale, averaging down, grid, pyramiding, or increasing size after losses.**
-5. **`risk:` and `safety:` values are ceilings.**
-   - Never raise them, and never raise `HARD_LIMITS` in `bot/config.py`.
+5. **`risk:`, `safety:` and `sleeves:` limits are ceilings.**
+   - Never raise them, and never raise `HARD_LIMITS` in `bot/config.py` or `SLEEVE_HARD_LIMITS` in `bot/sleeves.py`.
    - Never add a code path that bypasses `RiskManager.size()` or `RiskManager.check_entry()`.
 6. **Sizing comes only from `bot/risk.py`.** If IG's minimum stake would exceed the risk cap, skip the trade. Never round up.
 7. **Circuit breakers must always work:** the KILL file, PAUSE file, daily and weekly loss limits, the max-drawdown halt and the loss-streak pause. A halt is cleared only by a human (`--reset-halt`).

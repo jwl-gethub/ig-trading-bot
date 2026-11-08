@@ -108,16 +108,23 @@ class RiskManager:
         return pct
 
     def size(self, equity: float, stop_points: float, point_value: float,
-             min_size: float, size_step: float) -> SizeResult:
+             min_size: float, size_step: float, risk_pct: float | None = None,
+             max_size: float | None = None) -> SizeResult:
+        """Stake = equity x risk% / stop, rounded DOWN. `max_size` (e.g. a leverage cap) can only shrink it."""
         if equity <= 0:
             return SizeResult(False, reason="NO_EQUITY")
         if not stop_points or stop_points <= 0 or math.isnan(stop_points):
             return SizeResult(False, reason="NO_STOP")
-        pct = self.current_risk_pct()
+        pct = self.current_risk_pct() if risk_pct is None else float(risk_pct)
         budget = equity * pct / 100
         raw = budget / (stop_points * point_value)
+        capped = max_size is not None and max_size < raw
+        if capped:
+            raw = max_size
         size = math.floor(round(raw / size_step, 9)) * size_step
         size = round(size, 8)
+        if size < min_size and capped:
+            return SizeResult(False, reason=f"LEVERAGE_CAP: room for {max(raw, 0):.2f} < min size {min_size}")
         if size < min_size:
             at_min = min_size * stop_points * point_value
             return SizeResult(
@@ -131,7 +138,8 @@ class RiskManager:
 
     # ------------------------------------------------------------ entry gate
     def check_entry(self, ts, mkt: dict, exposures: Iterable[PositionState], equity: float,
-                    new_risk: float, new_margin: float) -> tuple[bool, str]:
+                    new_risk: float, new_margin: float, new_notional: float = 0.0,
+                    sleeve: str = "") -> tuple[bool, str]:
         ts = _ts(ts)
         st = self.state
         exposures = list(exposures)
@@ -155,8 +163,11 @@ class RiskManager:
         if ts.weekday() >= 5:
             return False, "WEEKEND"
 
-        if any(p.market == mkt["name"] for p in exposures):
+        if any(p.market == mkt["name"] and p.sleeve == sleeve for p in exposures):
             return False, "ALREADY_IN_MARKET"
+        ceiling = self.r.get("max_trade_risk_pct")
+        if ceiling and new_risk > equity * ceiling / 100 + 1e-9:
+            return False, "TRADE_RISK_CEILING"
         if len(exposures) >= self.r["max_open_positions"]:
             return False, "MAX_OPEN_POSITIONS"
         group_n = sum(1 for p in exposures if p.group == mkt["group"])
@@ -169,4 +180,7 @@ class RiskManager:
         open_margin = sum(p.margin for p in exposures)
         if open_margin + new_margin > equity * self.r["max_margin_utilisation_pct"] / 100:
             return False, "MARGIN_CAP"
+        lev = self.r.get("max_total_leverage")
+        if lev and sum(p.notional for p in exposures) + new_notional > equity * lev + 1e-9:
+            return False, "TOTAL_LEVERAGE_CAP"
         return True, "OK"

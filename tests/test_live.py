@@ -198,7 +198,7 @@ def test_startup_logs_feasibility(cfg, make_broker, tmp_path):
     _runner(cfg, broker, tmp_path, dry_run=True)
     lines = [json.loads(x) for x in (tmp_path / "logs" / "decisions.jsonl").read_text().splitlines()]
     feas = [x for x in lines if x["event"] == "FEASIBILITY"]
-    assert len(feas) == 3 and all("verdict" in f for f in feas)
+    assert len(feas) >= 3 and all("verdict" in f and f["sleeve"] for f in feas)
 
 
 
@@ -248,3 +248,26 @@ def test_sweep_orders_carry_server_side_target(cfg, make_broker, tmp_path):
     assert broker.orders, "expected sweep orders on regime data"
     assert all(o["limit_distance"] and o["stop_distance"] > 0 for o in broker.orders)
     assert all(abs(o["limit_distance"] / o["stop_distance"] - 2.0) < 0.05 for o in broker.orders)
+
+
+# ---------------------------------------------------------------- sleeves in live
+def test_live_sleeves_trade_independently_and_persist(cfg, make_broker, tmp_path):
+    cfg = _cfg3(cfg)
+    broker = make_broker(cfg, n_bars=1100, equity=10_000)
+    r, start = _runner(cfg, broker, tmp_path, dry_run=False)
+    assert {n: st.base for n, st in r.sleeves.states.items()} == {"leveraged": 1000, "trend": 4500, "meanrev": 4500}
+    _run(r, broker, start, 600)
+    events = [json.loads(x) for x in (tmp_path / "logs" / "decisions.jsonl").read_text().splitlines()]
+    opened = [e for e in events if e["event"] == "OPENED"]
+    assert opened, "expected trades"
+    owners = {sn: set(spec["modules"]) for sn, spec in cfg["sleeves"].items()}
+    for e in opened:
+        assert e["module"] in owners[e["sleeve"]]
+        if e["sleeve"] == "leveraged":
+            assert e["exposure_x"] <= 20.0 + 1e-6 and e["risk"] <= 0.10 * e["sleeve_equity"] + 1e-6
+        else:
+            assert e["exposure_x"] <= 3.0 + 1e-6 and e["risk"] <= 0.01 * e["sleeve_equity"] + 1e-6
+    # positions are keyed per sleeve, and sleeve state survives a restart
+    assert all(":" in k for k in r.positions)
+    r2 = LiveRunner(r.cfg, broker, tmp_path / "state", tmp_path / "logs", dry_run=False)
+    assert r2.sleeves.to_dict() == r.sleeves.to_dict() and set(r2.positions) == set(r.positions)

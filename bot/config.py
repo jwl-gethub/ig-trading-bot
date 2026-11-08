@@ -12,6 +12,8 @@ import yaml
 
 HARD_LIMITS = {
     "risk_per_trade_pct": 2.0,
+    "max_trade_risk_pct": 2.0,      # any single trade, % of the WHOLE account (sleeves included)
+    "max_total_leverage": 10.0,     # total exposure across all open trades, x account equity
     "max_total_open_risk_pct": 6.0,
     "max_open_positions": 5,
     "max_margin_utilisation_pct": 70.0,
@@ -46,6 +48,8 @@ def validate(cfg: dict) -> dict:
             raise ConfigError(f"risk.{key}={risk[key]} exceeds hard limit {ceiling}")
     if risk["risk_per_trade_pct"] > risk["max_total_open_risk_pct"]:
         raise ConfigError("risk_per_trade_pct cannot exceed max_total_open_risk_pct")
+    if risk["max_trade_risk_pct"] > risk["max_total_open_risk_pct"]:
+        raise ConfigError("max_trade_risk_pct cannot exceed max_total_open_risk_pct")
 
     names = set()
     for m in cfg["markets"]:
@@ -60,6 +64,8 @@ def validate(cfg: dict) -> dict:
             raise ConfigError(f"market {m['name']} unknown modules {bad}")
         if m["min_size"] <= 0 or m["size_step"] <= 0 or m["point_value"] <= 0:
             raise ConfigError(f"market {m['name']} sizes/point_value must be > 0")
+    from .sleeves import validate_sleeves
+    validate_sleeves(cfg)
     return cfg
 
 

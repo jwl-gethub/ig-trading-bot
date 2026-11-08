@@ -44,7 +44,7 @@ def test_no_stop_no_size(cfg):
 
 
 def test_group_and_market_limits(cfg):
-    r = rm(cfg)
+    r = rm(with_overrides(cfg, max_positions_per_group=1))
     mkt = {"name": "GBPUSD", "group": "fx_usd"}
     ok, why = r.check_entry(TS, mkt, [pos()], 10_000, 100, 100)
     assert not ok and why.startswith("GROUP_LIMIT")
@@ -61,7 +61,8 @@ def test_total_open_risk_cap(cfg):
 
 def test_max_positions(cfg):
     r = rm(cfg)
-    existing = [pos(f"M{i}", f"g{i}", 1, 0.5) for i in range(3)]
+    n = cfg["risk"]["max_open_positions"]
+    existing = [pos(f"M{i}", f"g{i}", 1, 0.5) for i in range(n)]
     ok, why = r.check_entry(TS, {"name": "Z", "group": "gz"}, existing, 10_000, 10, 10)
     assert not ok and why == "MAX_OPEN_POSITIONS"
 

@@ -31,6 +31,8 @@ Until the IG credentials are set, the bot idles and logs `waiting for credential
 | Close the bot's positions and stop | `BOT_KILL=1` |
 | Resume after a kill or drawdown halt | Remove `BOT_KILL`, then set `BOT_RESET_HALT` to the code shown in the logs (`reset code: XXXXXX`) |
 | Switch from log-only to demo orders | `BOT_DRY_RUN=false` |
+| Resume a sleeve that hit its own drawdown limit | `BOT_RESET_SLEEVES=leveraged` (comma-separated) |
+| See each sleeve's results | Logs → search `SLEEVES` (at startup) or `LEARNING_REPORT` (weekly) |
 | Re-enable a segment the learning loop switched off | `BOT_ENABLE_SEGMENTS=EURUSD:meanrev` (comma-separated) |
 | See what it has learned | Logs → search `LEARNING_REPORT` (weekly), or `/data/logs/learning_report.json` |
 | See what it's doing | Railway → Deployments → Logs. Every decision is also kept in `/data/logs/decisions.jsonl` |
