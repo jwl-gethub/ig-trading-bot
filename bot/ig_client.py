@@ -157,6 +157,13 @@ class IGClient:
         log.info("IG login ok env=%s account=%s", self.env, self.account_id)
 
     # ------------------------------------------------------------ data
+    def accounts(self) -> list[dict]:
+        """All accounts on this login: id, type (SPREADBET / CFD / PHYSICAL), name, currency, preferred."""
+        accts = self._request("GET", "/accounts", 1).json()["accounts"]
+        return [{"account_id": a["accountId"], "type": a.get("accountType"), "name": a.get("accountName"),
+                 "currency": a.get("currency"), "preferred": a.get("preferred"),
+                 "balance": (a.get("balance") or {}).get("balance")} for a in accts]
+
     def equity(self) -> float:
         accts = self._request("GET", "/accounts", 1).json()["accounts"]
         acct = next(a for a in accts if a["accountId"] == self.account_id)

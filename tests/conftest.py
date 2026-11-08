@@ -34,8 +34,17 @@ class FakeBroker:
         self.ig_positions: dict[str, dict] = {}
         self._n = 0
 
+    account_type = "SPREADBET"
+    account_id = "SB1"
+
     def login(self):
         pass
+
+    def accounts(self):
+        return [{"account_id": "SB1", "type": self.account_type, "name": "Spread bet", "currency": "GBP",
+                 "preferred": True, "balance": self._equity},
+                {"account_id": "CFD1", "type": "CFD", "name": "CFD", "currency": "GBP",
+                 "preferred": False, "balance": 0}]
 
     def equity(self):
         return self._equity

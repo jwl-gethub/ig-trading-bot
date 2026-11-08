@@ -271,3 +271,16 @@ def test_live_sleeves_trade_independently_and_persist(cfg, make_broker, tmp_path
     assert all(":" in k for k in r.positions)
     r2 = LiveRunner(r.cfg, broker, tmp_path / "state", tmp_path / "logs", dry_run=False)
     assert r2.sleeves.to_dict() == r.sleeves.to_dict() and set(r2.positions) == set(r.positions)
+
+
+
+def test_refuses_to_trade_on_wrong_account_type(cfg, make_broker, tmp_path):
+    cfg = _cfg3(cfg)
+    broker = make_broker(cfg, equity=10_000)
+    broker.account_type = "CFD"
+    first = next(iter(broker._bars.values()))
+    broker.now = first.index[400]
+    r = LiveRunner(cfg, broker, tmp_path / "state", tmp_path / "logs", dry_run=False)
+    with pytest.raises(SafetyError, match="ACCOUNT_TYPE_MISMATCH"):
+        r.startup(broker.now)
+    assert broker.orders == []

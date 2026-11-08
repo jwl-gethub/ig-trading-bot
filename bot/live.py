@@ -471,6 +471,7 @@ class LiveRunner:
     def startup(self, now: pd.Timestamp | None = None) -> None:
         now = now or pd.Timestamp.now(tz="UTC")
         self.broker.login()
+        self.check_account_type()
         self.sleeves.ensure_bases(self.broker.equity())
         self.warm_up(now)
         self.reconcile(now)
@@ -478,6 +479,20 @@ class LiveRunner:
         self.log_feasibility()
         self.log_market_search()
         self.save_state()
+
+    def check_account_type(self) -> None:
+        """Refuse to trade on the wrong kind of account: sizing is GBP per point (spread bet)."""
+        if not hasattr(self.broker, "accounts"):
+            return
+        want = str(self.cfg.get("account", {}).get("type", "SPREADBET")).upper()
+        accts = self.broker.accounts()
+        current = next((a for a in accts if a["account_id"] == self.broker.account_id), None)
+        self.event("ACCOUNTS", using=self.broker.account_id, expected_type=want, accounts=accts)
+        if current is None or str(current["type"]).upper() != want:
+            got = current["type"] if current else "unknown"
+            options = [a["account_id"] for a in accts if str(a["type"]).upper() == want]
+            raise SafetyError(f"ACCOUNT_TYPE_MISMATCH: logged into {self.broker.account_id} ({got}), "
+                              f"bot is configured for {want}. Set IG_ACCOUNT_ID to one of {options}.")
 
     def log_market_search(self) -> None:
         """BOT_SEARCH_MARKETS=silver,copper logs IG's matching instruments (spread-bet DFB first). No trading effect."""
@@ -640,7 +655,11 @@ def main(argv: list[str] | None = None) -> None:
     log.info("starting env=%s dry_run=%s risk_per_trade=%s%% markets=%s", env, runner.dry_run,
              cfg["risk"]["risk_per_trade_pct"], ",".join(runner.mkts))
     runner.event("STARTED", env=env, dry_run=runner.dry_run, risk_pct=cfg["risk"]["risk_per_trade_pct"])
-    runner.startup()
+    try:
+        runner.startup()
+    except SafetyError as exc:          # wrong account type etc.: stay up, trade nothing, say why
+        runner.event("STARTUP_REFUSED", reason=str(exc))
+        _idle(runner, f"STARTUP_REFUSED: {exc}")
     errors = 0
     while True:
         lock.beat()
