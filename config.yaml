@@ -274,6 +274,21 @@ learning:
   disable_confidence: 0.95            # stricter bar for the automatic switch-off
   sentiment_crowd_threshold: 60       # >=60% of IG clients on one side = "crowded"
 
+# ---------------------------------------------------------------------
+# Kronos (bot/kronos_shadow.py): SHADOW ONLY. Forecasts every new 4H bar ~24h ahead,
+# records and scores them. Never used to open, size or close trades.
+# BOT_KRONOS=0 in Railway turns it off.
+# ---------------------------------------------------------------------
+kronos:
+  enabled: true
+  model: NeoQuasar/Kronos-small
+  tokenizer: NeoQuasar/Kronos-Tokenizer-base
+  lookback_bars: 400
+  horizon_bars: 6              # 6 x 4H = 24 hours ahead
+  samples: 5                   # averaged sample paths per forecast
+  timeout_s: 300               # worker is killed after this; trading unaffected
+  min_forecasts_for_verdict: 200
+
 backtest:
   initial_equity: 2000
   slippage_frac_of_spread: 0.25   # extra slippage per fill = 0.25 x spread (spreads above are already padded)

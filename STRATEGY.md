@@ -184,6 +184,13 @@ No martingale, no averaging down, no grid, no adding to losers, no removing or w
 3. **Automatic action, off only.** A market+module segment with 30+ trades and a 95% range entirely below zero is disabled. The loop can never enable a segment, increase size or change parameters. Those come out as **suggestions** that must go through the strategy-change protocol and your approval. To re-enable a segment, set `BOT_ENABLE_SEGMENTS=MARKET:module`.
 4. **Sentiment is recorded, not traded.** IG only provides the current sentiment snapshot, so it can't be backtested. The loop compares with-crowd and against-crowd results on live data. If one is clearly better, it suggests a filter.
 
+5. **Replay test (Monte Carlo).** Each week, every sleeve's real trade results (in R) are reshuffled 10,000 times and compounded at that sleeve's risk per trade. This shows the chance of hitting the sleeve's stop-out and the typical and worst drawdowns over the next 30 and 100 trades. With fewer than 20 real trades, the sweep sleeve gets a scenario grid instead (30–45% win rates, +2R vs −1R). Run it yourself with `python -m bot.montecarlo --risk 10 --dd 50 --win-rate 0.4 --payoff 2`.
+6. **Kronos, shadow only** (`bot/kronos_shadow.py`). Kronos is an open-source candlestick forecasting model (MIT licence, vendored in `bot/vendor/kronos`). On every new 4H bar it forecasts each market 24h ahead, running in a separate process with a time limit so it can never block or crash trading.
+   - Forecasts go to `logs/kronos.jsonl`. They are scored weekly against what price actually did: hit rate with a confidence range, and rank correlation.
+   - Trades opened on a bar are tagged with whether Kronos agreed, which becomes a learning-loop segment.
+   - Verdicts need 200+ scored forecasts. **It never opens, sizes or closes a trade.** Using it as a filter would need a backtest and your approval.
+   - `BOT_KRONOS=0` turns it off.
+
 The same journal format comes out of the backtester (`report.json → learning`), so live and backtest results are directly comparable.
 
 ## 12. Promotion path

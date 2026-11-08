@@ -42,6 +42,7 @@ from .feasibility import feasibility_row
 from .indicators import compute_all, true_range
 from .risk import RiskManager, RiskState
 from .sleeves import Sleeves, sleeve_key
+from .kronos_shadow import KronosShadow
 from .learning import append_journal, journal_record, load_journal, review
 from .learning import settings as learning_settings
 from .strategy import PositionState, Strategy, entry_features
@@ -161,6 +162,7 @@ class LiveRunner:
         self.unmanaged_seen: set[str] = set()
         self.risk = RiskManager(cfg["risk"], cfg["safety"])
         self.sleeves = Sleeves(cfg)
+        self.kronos = KronosShadow(cfg, self.log_dir, self.state_dir)
         self._info_cache: dict[str, tuple] = {}
         self._load_state()
 
@@ -230,6 +232,11 @@ class LiveRunner:
         if not force and week == self.risk.state.last_learning_week:
             return None
         rep = review(load_journal(self.log_dir / "trades.jsonl"), self.cfg, self.risk.state.disabled_segments)
+        if self.kronos.enabled or self.kronos.log_path.exists():
+            try:
+                rep["kronos"] = self.kronos.evaluate(self.bars)
+            except Exception as exc:
+                rep["kronos"] = {"error": repr(exc)}
         for seg in rep["disable"]:
             if seg not in self.risk.state.disabled_segments:
                 self.risk.state.disabled_segments.append(seg)
@@ -239,7 +246,8 @@ class LiveRunner:
         (self.log_dir / "learning_report.json").write_text(json.dumps(rep, indent=2, default=str))
         self.event("LEARNING_REPORT", week=week, trades=rep["trades"], overall=rep.get("overall"),
                    findings=rep["findings"], suggestions=rep["suggestions"], disabled_now=rep["disable"],
-                   disabled_total=list(self.risk.state.disabled_segments), sleeves=self.sleeve_summary())
+                   disabled_total=list(self.risk.state.disabled_segments), sleeves=self.sleeve_summary(),
+                   replay=rep.get("montecarlo"), kronos=rep.get("kronos"))
         self.save_state()
         return rep
 
@@ -481,7 +489,40 @@ class LiveRunner:
         self.event("SLEEVES", **self.sleeve_summary())
         self.log_feasibility()
         self.log_market_search()
+        self.kronos_selftest()
         self.save_state()
+
+    # ---------------- Kronos (shadow only: recorded and scored, never traded on)
+    def kronos_selftest(self) -> None:
+        if not self.kronos.enabled:
+            return
+        name = next((m for m, df in self.bars.items() if len(df) >= 100), None)
+        if not name:
+            return
+        try:
+            res = self.kronos.forecast({name: self.bars[name]})
+            r = res["results"].get(name, {})
+            self.event("KRONOS_SELFTEST", ok="error" not in r, market=name, seconds=res.get("seconds"),
+                       load_seconds=res.get("load_seconds"), result=r)
+        except Exception as exc:
+            self.event("KRONOS_SELFTEST", ok=False, error=repr(exc))
+
+    def _run_kronos(self, markets: list[str], now) -> None:
+        try:
+            res = self.kronos.forecast({m: self.bars[m] for m in markets if m in self.bars})
+        except Exception as exc:          # never let the shadow model disturb trading
+            self.event("KRONOS_ERROR", error=repr(exc))
+            return
+        for m, r in res.get("results", {}).items():
+            if "error" in r:
+                self.event("KRONOS_ERROR", market=m, error=r["error"])
+                continue
+            self.event("KRONOS_FORECAST", market=m, bar=r["bar"], last_close=r["last_close"],
+                       pred_close=r["pred_close"], exp_ret_pct=r["exp_ret_pct"], seconds=res.get("seconds"))
+            for pos in self.positions.values():
+                if pos.market == m and pos.entry_ts == str(now):     # opened on this bar
+                    pos.features["kronos_exp_ret_pct"] = r["exp_ret_pct"]
+                    pos.features["kronos_agree"] = bool((r["exp_ret_pct"] > 0) == (pos.direction == 1))
 
     def check_account_type(self) -> None:
         """Refuse to trade on the wrong kind of account: sizing is GBP per point (spread bet)."""
@@ -580,6 +621,8 @@ class LiveRunner:
             for sn in self.sleeves.names():
                 if sleeve_key(sn, name) not in self.positions:
                     self._try_entry(name, sn, row, equity, now)
+        if self.kronos.enabled:           # after all trading decisions: adds no delay to orders
+            self._run_kronos(updated, now)
         self.save_state()
         return True
 

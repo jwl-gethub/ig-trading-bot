@@ -30,7 +30,7 @@ DEFAULTS = {
     "sentiment_crowd_threshold": 60,
 }
 SEGMENTS = [
-    ("sleeve",), ("segment",), ("market",), ("module",), ("regime",), ("score",), ("crowd",),
+    ("sleeve",), ("segment",), ("market",), ("module",), ("regime",), ("score",), ("crowd",), ("kronos",),
     ("session",), ("weekday",), ("exit_reason",), ("module", "crowd"),
 ]
 
@@ -111,6 +111,8 @@ def enrich(df: pd.DataFrame, s: dict) -> pd.DataFrame:
         df[key] = feats.apply(lambda f, k=key: f.get(k))
     df["session"] = df["hour_utc"].apply(_session)
     df["crowd"] = [_crowd(d, p, s["sentiment_crowd_threshold"]) for d, p in zip(df["direction"], df["crowd_long_pct"])]
+    agree = feats.apply(lambda f: f.get("kronos_agree"))
+    df["kronos"] = agree.map({True: "kronos_agreed", False: "kronos_disagreed"}).fillna("no_forecast")
     df["r"] = pd.to_numeric(df["r"], errors="coerce")
     return df.dropna(subset=["r"])
 
@@ -140,6 +142,8 @@ def review(journal: pd.DataFrame, cfg: dict, already_disabled: list[str] | None 
     n_total = int(len(df))
     out: dict = {"trades": n_total, "confidence": conf, "findings": [], "suggestions": [],
                  "disable": [], "segments": {}}
+    from .montecarlo import sleeve_report
+    out["montecarlo"] = sleeve_report(df if n_total else None, cfg)
     if n_total == 0:
         out["findings"].append("No closed trades yet.")
         return out

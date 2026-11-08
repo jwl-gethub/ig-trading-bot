@@ -15,7 +15,9 @@ from bot.ig_client import MarketInfo  # noqa: E402
 
 @pytest.fixture
 def cfg():
-    return copy.deepcopy(load_config(ROOT / "config.yaml"))
+    c = copy.deepcopy(load_config(ROOT / "config.yaml"))
+    c["kronos"]["enabled"] = False          # tests that need Kronos switch it on with a fake worker
+    return c
 
 
 class FakeBroker:
