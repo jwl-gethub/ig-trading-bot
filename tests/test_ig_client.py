@@ -103,3 +103,12 @@ def test_market_info_when_market_closed():
     c = client({("GET", "/markets/E"): Resp(200, market)})
     info = c.market_info("E")
     assert not info.tradeable and info.min_size == 0.5 and info.min_stop_distance == 0.0
+
+
+def test_open_position_sends_limit_when_given():
+    def h(hd, body, p):
+        assert body["limitDistance"] == 20.0 and body["stopDistance"] == 10.0
+        return Resp(200, {"dealReference": "R9"})
+    c = client({("POST", "/positions/otc"): h,
+                ("GET", "/confirms/R9"): Resp(200, {"dealStatus": "ACCEPTED", "dealId": "D9", "limitLevel": 120})})
+    assert c.open_position("X", "BUY", 1.0, 10.0, "DFB", "GBP", limit_distance=20.0)["limit_level"] == 120

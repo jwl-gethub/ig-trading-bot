@@ -219,7 +219,7 @@ def test_learned_disabled_segments_block_entries(cfg, make_broker, tmp_path):
     cfg = _cfg3(cfg)
     broker = make_broker(cfg, equity=100_000)
     r, start = _runner(cfg, broker, tmp_path, dry_run=False)
-    r.risk.state.disabled_segments = [f"{m}:{mod}" for m in LIVE_TEST_MARKETS for mod in ("trend", "meanrev")]
+    r.risk.state.disabled_segments = [f"{m}:{mod}" for m in LIVE_TEST_MARKETS for mod in ("trend", "meanrev", "sweep")]
     r.risk.state.last_learning_week = "9999-W99"   # keep the weekly review out of this test
     _run(r, broker, start, 250)
     assert broker.orders == []
@@ -236,3 +236,15 @@ def test_weekly_review_runs_once_per_week_and_writes_report(cfg, make_broker, tm
     assert r.maybe_learn(now + pd.Timedelta(days=2)) is None          # same ISO week
     assert r.maybe_learn(now + pd.Timedelta(days=7)) is not None      # next week
     assert (tmp_path / "logs" / "learning_report.json").exists()
+
+
+def test_sweep_orders_carry_server_side_target(cfg, make_broker, tmp_path):
+    cfg = _cfg3(cfg)
+    for m in cfg["markets"]:
+        m["modules"] = ["sweep"]
+    broker = make_broker(cfg, n_bars=1400, equity=100_000)
+    r, start = _runner(cfg, broker, tmp_path, dry_run=False)
+    _run(r, broker, start, 900)
+    assert broker.orders, "expected sweep orders on regime data"
+    assert all(o["limit_distance"] and o["stop_distance"] > 0 for o in broker.orders)
+    assert all(abs(o["limit_distance"] / o["stop_distance"] - 2.0) < 0.05 for o in broker.orders)

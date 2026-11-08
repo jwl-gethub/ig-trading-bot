@@ -1,4 +1,4 @@
-# Strategy spec: Regime-Switching Confluence (IG spread bets, 4H)
+# Strategy spec: Regime-Switching Confluence + Sweep & Reclaim (IG spread bets, 4H)
 
 This is the source of truth for trading logic. `bot/strategy.py` implements it, and the backtest and live bot run the same code.
 
@@ -86,6 +86,26 @@ Volume is excluded on purpose: IG's volume is tick volume and isn't reliable.
 - RSI(2) > 70 (short: < 30)
 - 6 bars have passed (time stop)
 - the stop is hit
+
+## 6b. Module C: 4H sweep and reclaim (liquidity grab)
+
+Added on 2026-11-08 from a price-action setup the owner shared. It is unproven and on demo as an experiment: the learning loop tracks it as its own segment, and it needs a real-data backtest before live.
+
+**Long.** All conditions are required, on a closed 4H candle:
+- Its low dips **below the previous candle's low** by at least 0.1 × ATR (the sweep)
+- It closes **above the previous candle's high** (the reclaim, engulfing it)
+- It is a bullish candle (close > open)
+- **Uptrend context:** close > EMA200 and EMA20 > EMA50
+
+**Short:** the mirror image, only where shorts are allowed.
+
+**Stop:** just beyond the sweep wick (low − 0.1 × ATR), placed server-side. If the stop would be wider than 2.5 × ATR, the trade is skipped. It is never tighter than 0.5 × ATR.
+
+**Target:** **2R** (twice the risk), sent to IG as a server-side limit order.
+
+**Time stop:** 12 bars (2 days) if neither the stop nor the target is hit.
+
+Any market type is allowed (trending, ranging or neutral), because the trend-context filter does the directional job. If several modules signal on the same bar, trend takes priority, then sweep, then mean reversion. A pure random-walk test shows no edge (−0.04R average over 1,830 trades), so the engine isn't inventing one.
 
 ## 7. Risk and position sizing (`bot/risk.py`)
 

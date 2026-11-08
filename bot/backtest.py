@@ -134,6 +134,8 @@ class Backtester:
                     fill = row["open"] + sig.direction * cost
                     prov.entry_price = fill
                     prov.stop_level = fill - sig.direction * sig.stop_distance
+                    prov.target_level = (fill + sig.direction * sig.target_distance
+                                         if sig.target_distance else None)
                     prov.extreme = fill
                     prov.entry_ts = str(ts)
                     positions[name] = prov
@@ -144,9 +146,14 @@ class Backtester:
                 if name in positions:
                     pos = positions[name]
                     hit = (row["low"] <= pos.stop_level) if pos.direction == 1 else (row["high"] >= pos.stop_level)
-                    if hit:
+                    tgt = pos.target_level
+                    tgt_hit = tgt is not None and (
+                        row["high"] >= tgt if pos.direction == 1 else row["low"] <= tgt)
+                    if hit:   # stop checked first: if both touched in one bar, assume the worse outcome
                         raw = min(row["open"], pos.stop_level) if pos.direction == 1 else max(row["open"], pos.stop_level)
                         close_trade(name, raw - pos.direction * cost, ts, "stop")
+                    elif tgt_hit:   # limit order fills at the target, paying half the spread
+                        close_trade(name, tgt - pos.direction * mkt["backtest_spread_points"] / 2, ts, "target")
                     else:
                         hours = (ts - last_fund_ts[name]).total_seconds() / 3600
                         rate = mkt["funding_long_pct"] if pos.direction == 1 else mkt["funding_short_pct"]

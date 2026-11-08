@@ -283,9 +283,10 @@ class LiveRunner:
         ig = {p["deal_id"]: p for p in self.broker.open_positions()}
         for name, pos in list(self.positions.items()):
             if pos.deal_id not in ig:
-                pnl = self._journal(pos, pos.stop_level, "closed_server_side", now)
+                exit_px, how = self._estimate_server_exit(name, pos)
+                pnl = self._journal(pos, exit_px, how, now)
                 self.event("POSITION_GONE", market=name, deal_id=pos.deal_id, pnl_est=round(pnl, 2),
-                           note="assumed stopped out; verify in IG history")
+                           assumed=how, note="estimated from stop/target levels; verify in IG history")
                 del self.positions[name]
             elif ig[pos.deal_id]["stop_level"] is None:
                 self.event("MISSING_STOP", market=name, deal_id=pos.deal_id)
@@ -297,6 +298,16 @@ class LiveRunner:
             if deal_id not in ours and deal_id not in self.unmanaged_seen:
                 self.unmanaged_seen.add(deal_id)
                 self.event("UNMANAGED_POSITION_IGNORED", deal_id=deal_id, epic=p["epic"])
+
+    def _estimate_server_exit(self, name: str, pos: PositionState) -> tuple[float, str]:
+        """IG closed it (stop or limit hit). Use the latest bar to judge which one."""
+        df = self.bars.get(name)
+        if pos.target_level is not None and df is not None and len(df):
+            bar = df.iloc[-1]
+            reached = bar["high"] >= pos.target_level if pos.direction == 1 else bar["low"] <= pos.target_level
+            if reached:
+                return pos.target_level, "target_server_side"
+        return pos.stop_level, "stop_server_side"
 
     # ---------------- actions
     def _close(self, name: str, reason: str, now) -> None:
@@ -386,6 +397,9 @@ class LiveRunner:
         order = {"epic": mkt["epic"], "direction": "BUY" if sig.direction == 1 else "SELL",
                  "size": sz.size, "stop_distance": round(stop_dist, 1), "expiry": info.expiry,
                  "currency": info.currency}
+        target_dist = sig.target_distance * stop_dist / sig.stop_distance if sig.target_distance else None
+        if target_dist:
+            order["limit_distance"] = round(target_dist, 1)
         assert_order_safe(order)
         if self.dry_run:
             self.event("DRY_RUN_ORDER", market=name, risk=round(sz.risk_amount, 2), **order)
@@ -398,6 +412,8 @@ class LiveRunner:
         prov.entry_price = level
         prov.extreme = level
         prov.stop_level = float(res.get("stop_level") or level - sig.direction * stop_dist)
+        if target_dist:
+            prov.target_level = float(res.get("limit_level") or level + sig.direction * target_dist)
         prov.deal_id = res["deal_id"]
         self.positions[name] = prov
         self.event("OPENED", market=name, deal_id=prov.deal_id, level=level, stop=prov.stop_level,

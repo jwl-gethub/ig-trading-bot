@@ -86,3 +86,36 @@ def test_excursions_tracked(cfg):
     st.manage(p, trend_row(high=104.0, low=97.0, close=103.0))
     st.manage(p, trend_row(high=102.0, low=99.0, close=101.0))
     assert p.mfe_pts == 4.0 and p.mae_pts == 3.0
+
+
+# ---------------------------------------------------------------- sweep & reclaim
+def sweep_row(**over):
+    # prev candle 104-108; this candle dips to 102 (below 104) and closes 109 (above 108)
+    r = trend_row(regime="NEUTRAL", open=105.0, high=109.5, low=102.0, close=109.0,
+                  prev_low=104.0, prev_high=108.0, atr=4.0, ema_fast=106.0, ema_mid=104.0, ema_slow=100.0)
+    r.update(over)
+    return r
+
+
+def test_sweep_long_fires_with_stop_under_wick_and_2r_target(cfg):
+    s = Strategy(cfg["strategy"]).entry_signal({**MKT, "modules": ["sweep"]}, sweep_row())
+    assert s and s.module == "sweep" and s.direction == 1
+    assert s.stop_distance == 109.0 - (102.0 - 0.1 * 4.0)              # 7.4
+    assert s.target_distance == cfg["strategy"]["sweep"]["target_r"] * s.stop_distance
+
+
+def test_sweep_needs_reclaim_trend_and_sane_stop(cfg):
+    st = Strategy(cfg["strategy"])
+    mk = {**MKT, "modules": ["sweep"]}
+    assert st.entry_signal(mk, sweep_row(close=107.5)) is None          # didn't close above prev high
+    assert st.entry_signal(mk, sweep_row(ema_slow=112.0)) is None       # no uptrend context
+    assert st.entry_signal(mk, sweep_row(low=95.0)) is None             # stop wider than 2.5 ATR
+    assert st.entry_signal(mk, sweep_row(low=103.9)) is None            # sweep too shallow (<0.1 ATR)
+
+
+def test_sweep_time_stop(cfg):
+    st = Strategy(cfg["strategy"])
+    p = _pos("sweep")
+    for _ in range(cfg["strategy"]["sweep"]["max_bars"] - 1):
+        assert not st.manage(p, trend_row()).close
+    assert st.manage(p, trend_row()).reason == "time_stop"

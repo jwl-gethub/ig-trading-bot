@@ -25,6 +25,7 @@ class Signal:
     max_score: int
     conditions: dict
     snapshot: dict
+    target_distance: float | None = None   # take-profit distance (sweep module); None = no fixed target
 
 
 @dataclass
@@ -44,6 +45,7 @@ class PositionState:
     deal_id: str | None = None
     margin: float = 0.0
     group: str = ""
+    target_level: float | None = None
     mfe_pts: float = 0.0     # max favourable excursion since entry (points)
     mae_pts: float = 0.0     # max adverse excursion since entry (points)
     features: dict = field(default_factory=dict)   # entry context, for the learning journal
@@ -84,6 +86,8 @@ def entry_features(sig: Signal, row: Mapping, ts=None, **extra) -> dict:
         "dist_ema200_atr": round((snap["close"] - snap["ema_slow"]) / atr, 2) if atr == atr and atr else None,
         "conditions": [k for k, v in sig.conditions.items() if v],
     }
+    if sig.target_distance:
+        f["target_r"] = round(sig.target_distance / sig.stop_distance, 2)
     if ts is not None:
         t = ts if hasattr(ts, "hour") else None
         if t is not None:
@@ -107,6 +111,11 @@ class Strategy:
         if regime == "TREND" and "trend" in modules:
             for d in directions:
                 sig = self._trend(mkt, row, d)
+                if sig:
+                    return sig
+        if "sweep" in modules and "sweep" in self.p:
+            for d in directions:
+                sig = self._sweep(mkt, row, d)
                 if sig:
                     return sig
         if regime == "RANGE" and "meanrev" in modules:
@@ -149,6 +158,38 @@ class Strategy:
                 snapshot=_snap(r),
             )
         return None
+
+    def _sweep(self, mkt: Mapping, r: Mapping, d: int) -> Signal | None:
+        """Candle dips beyond the previous candle's extreme, then closes back through its other side."""
+        w = self.p["sweep"]
+        a = r["atr"]
+        if d == 1:
+            cond = {
+                "swept_prev_low": r["low"] < r["prev_low"] - w["min_sweep_atr"] * a,
+                "reclaimed_prev_high": r["close"] > r["prev_high"],
+                "bull_candle": r["close"] > r["open"],
+                "trend_context": (r["close"] > r["ema_slow"] and r["ema_fast"] > r["ema_mid"])
+                if w.get("require_trend", True) else True,
+            }
+            raw_stop = r["close"] - (r["low"] - w["stop_buffer_atr"] * a)
+        else:
+            cond = {
+                "swept_prev_low": r["high"] > r["prev_high"] + w["min_sweep_atr"] * a,
+                "reclaimed_prev_high": r["close"] < r["prev_low"],
+                "bull_candle": r["close"] < r["open"],
+                "trend_context": (r["close"] < r["ema_slow"] and r["ema_fast"] < r["ema_mid"])
+                if w.get("require_trend", True) else True,
+            }
+            raw_stop = (r["high"] + w["stop_buffer_atr"] * a) - r["close"]
+        cond = {k: bool(v) for k, v in cond.items()}
+        if not all(cond.values()) or raw_stop > w["max_stop_atr"] * a:
+            return None
+        stop = float(max(raw_stop, w["min_stop_atr"] * a))
+        return Signal(
+            market=mkt["name"], direction=d, module="sweep", stop_distance=stop,
+            score=len(cond), max_score=len(cond), conditions=cond, snapshot=_snap(r),
+            target_distance=float(w["target_r"] * stop),
+        )
 
     def _meanrev(self, mkt: Mapping, r: Mapping, d: int) -> Signal | None:
         m = self.p["meanrev"]
@@ -197,6 +238,11 @@ class Strategy:
             if tighter and right_side:
                 return ExitDecision(new_stop=float(trail), reason="trail")
             return ExitDecision()
+
+        if pos.module == "sweep":
+            if pos.bars_held >= self.p["sweep"]["max_bars"]:
+                return ExitDecision(close=True, reason="time_stop")
+            return ExitDecision()   # stop and target are server-side
 
         m = self.p["meanrev"]
         if d == 1 and (r["close"] >= r["bb_mid"] or r["rsi_fast"] > m["rsi_fast_exit"]):

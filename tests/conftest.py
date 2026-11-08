@@ -66,21 +66,26 @@ class FakeBroker:
                 continue
             bar = self._visible(p["epic"]).iloc[-1]
             hit = bar["low"] <= p["stop_level"] if p["direction"] == "BUY" else bar["high"] >= p["stop_level"]
+            lim = p.get("limit_level")
+            if lim is not None:
+                hit = hit or (bar["high"] >= lim if p["direction"] == "BUY" else bar["low"] <= lim)
             if hit:
                 self.ig_positions.pop(deal_id)
         return list(self.ig_positions.values())
 
-    def open_position(self, epic, direction, size, stop_distance, expiry, currency):
+    def open_position(self, epic, direction, size, stop_distance, expiry, currency, limit_distance=None):
         assert stop_distance and stop_distance > 0, "order without stop reached the broker"
         self._n += 1
         deal_id = f"D{self._n}"
         px = float(self._visible(epic)["close"].iloc[-1])
         sign = 1 if direction == "BUY" else -1
-        self.orders.append(dict(epic=epic, direction=direction, size=size, stop_distance=stop_distance))
+        self.orders.append(dict(epic=epic, direction=direction, size=size, stop_distance=stop_distance,
+                                limit_distance=limit_distance))
+        limit = px + sign * limit_distance if limit_distance else None
         self.ig_positions[deal_id] = dict(deal_id=deal_id, epic=epic, direction=direction, size=size,
-                                          level=px, stop_level=px - sign * stop_distance)
+                                          level=px, stop_level=px - sign * stop_distance, limit_level=limit)
         return {"status": "ACCEPTED", "deal_id": deal_id, "level": px,
-                "stop_level": px - sign * stop_distance}
+                "stop_level": px - sign * stop_distance, "limit_level": limit}
 
     def update_stop(self, deal_id, stop_level):
         p = self.ig_positions.get(deal_id, {})

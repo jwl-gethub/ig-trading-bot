@@ -55,7 +55,7 @@ def validate(cfg: dict) -> dict:
         if m["name"] in names:
             raise ConfigError(f"duplicate market {m['name']}")
         names.add(m["name"])
-        bad = set(m["modules"]) - {"trend", "meanrev"}
+        bad = set(m["modules"]) - {"trend", "meanrev", "sweep"}
         if bad:
             raise ConfigError(f"market {m['name']} unknown modules {bad}")
         if m["min_size"] <= 0 or m["size_step"] <= 0 or m["point_value"] <= 0:

@@ -67,3 +67,32 @@ def test_backtest_trades_carry_learning_features(cfg):
     assert t.features and "score" in t.features and t.mfe_r >= 0 and t.mae_r >= 0
     j = pd.DataFrame([{**t.__dict__, "r": t.r_multiple, "segment": f"{t.market}:{t.module}"} for t in res.trades])
     assert review(j, cfg)["trades"] == len(res.trades)
+
+
+def test_sweep_trades_use_targets(cfg):
+    import copy
+    cfg = copy.deepcopy(cfg)
+    for m in cfg["markets"]:
+        m["modules"] = ["sweep"]
+    data = synthetic_universe(cfg["markets"], 3000, regimes=True)
+    res = Backtester(cfg, data, 100_000).run()
+    reasons = {t.exit_reason for t in res.trades}
+    assert res.trades and "target" in reasons and {t.module for t in res.trades} == {"sweep"}
+    for t in res.trades:
+        if t.exit_reason == "target":
+            assert 1.5 < t.r_multiple < 2.1        # ~2R minus costs/funding
+
+
+def test_sweep_has_no_edge_on_random_walk(cfg):
+    import copy
+    cfg = copy.deepcopy(cfg)
+    cfg["risk"]["max_drawdown_halt_pct"] = 25
+    for m in cfg["markets"]:
+        m["modules"] = ["sweep"]
+    rs = []
+    for seed in range(6):
+        data = synthetic_universe(cfg["markets"], 3000, seed=900 + seed * 10, regimes=False)
+        rs += [t.r_multiple for t in Backtester(cfg, data, 1_000_000).run().trades]
+    r = np.array(rs)
+    assert len(r) > 150
+    assert r.mean() < 0.05, f"suspicious edge on random data: avg R {r.mean():.3f}"

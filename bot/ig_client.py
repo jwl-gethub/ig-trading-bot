@@ -241,7 +241,7 @@ class IGClient:
         raise IGError(0, "confirm_timeout", deal_reference)
 
     def open_position(self, epic: str, direction: str, size: float, stop_distance: float,
-                      expiry: str, currency: str) -> dict:
+                      expiry: str, currency: str, limit_distance: float | None = None) -> dict:
         # GUARDRAIL: refuse any order without a positive server-side stop distance.
         if stop_distance is None or not stop_distance > 0:
             raise SafetyError("refusing to open a position without a stop")
@@ -253,10 +253,13 @@ class IGClient:
             "stopDistance": round(stop_distance, 1), "forceOpen": True, "currencyCode": currency,
             "trailingStop": False,
         }
+        if limit_distance is not None and limit_distance > 0:
+            body["limitDistance"] = round(limit_distance, 1)
         ref = self._request("POST", "/positions/otc", 2, json=body, trading=True).json()["dealReference"]
         c = self.confirm(ref)
         return {"status": c.get("dealStatus"), "reason": c.get("reason"), "deal_id": c.get("dealId"),
-                "level": c.get("level"), "stop_level": c.get("stopLevel"), "deal_reference": ref}
+                "level": c.get("level"), "stop_level": c.get("stopLevel"), "limit_level": c.get("limitLevel"),
+                "deal_reference": ref}
 
     def update_stop(self, deal_id: str, stop_level: float) -> dict:
         body = {"stopLevel": stop_level, "limitLevel": None, "trailingStop": False}
