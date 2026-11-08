@@ -70,7 +70,11 @@ def apply_live_risk_cap(cfg: dict, env: str) -> None:
     """First live phase trades at reduced risk unless the human approves full risk."""
     if env == "LIVE" and not cfg["safety"].get("live_full_risk_approved", False):
         cap = cfg["promotion"]["live_initial_risk_per_trade_pct"]
-        cfg["risk"]["risk_per_trade_pct"] = min(cfg["risk"]["risk_per_trade_pct"], cap)
+        base = cfg["risk"]["risk_per_trade_pct"]
+        factor = min(1.0, cap / base) if base > 0 else 1.0
+        cfg["risk"]["risk_per_trade_pct"] = min(base, cap)
+        for sleeve in (cfg.get("sleeves") or {}).values():   # sleeves size from their own %, scale them too
+            sleeve["risk_per_trade_pct"] = sleeve["risk_per_trade_pct"] * factor
 
 
 def assert_order_safe(order: dict) -> None:

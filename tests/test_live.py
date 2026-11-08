@@ -21,8 +21,11 @@ def test_live_requires_triple_lock(cfg):
 
 
 def test_live_risk_capped_until_approved(cfg):
+    before = {n: sp["risk_per_trade_pct"] for n, sp in cfg["sleeves"].items()}
     apply_live_risk_cap(cfg, "LIVE")
     assert cfg["risk"]["risk_per_trade_pct"] == cfg["promotion"]["live_initial_risk_per_trade_pct"]
+    for n, sp in cfg["sleeves"].items():                       # sleeves halved too (1% -> 0.5%)
+        assert sp["risk_per_trade_pct"] == before[n] / 2
 
 
 def test_orders_without_stop_are_refused(cfg):
