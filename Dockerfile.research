@@ -4,4 +4,5 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY research ./research
+COPY bot/__init__.py bot/dipbuy.py bot/dukascopy.py ./bot/
 CMD ["python", "-m", "research.intraday"]

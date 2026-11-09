@@ -131,9 +131,13 @@ def main() -> None:
     markets = [m for m in os.environ.get("RESEARCH_MARKETS", ",".join(MARKETS)).split(",") if m]
     log({"event": "START", "markets": markets, "cache": str(cache)})
     try:
-        dip_markets = [m for m in os.environ.get("RESEARCH_DIP_MARKETS", "US500,USTECH").split(",") if m]
-        run_dip(dip_markets, cache)
-        log({"event": "DIP_DONE", "markets": dip_markets})
+        if os.environ.get("RESEARCH_DIP_SCREEN", "1") == "1":
+            from .dip_markets import screen
+            screen(str(cache.parent / "hourly"))
+        dip_markets = [m for m in os.environ.get("RESEARCH_DIP_MARKETS", "").split(",") if m]
+        if dip_markets:
+            run_dip(dip_markets, cache)
+            log({"event": "DIP_DONE", "markets": dip_markets})
         run(markets, cache)
     except Exception as exc:
         log({"event": "ERROR", "error": repr(exc)})
