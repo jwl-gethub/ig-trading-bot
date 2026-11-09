@@ -67,7 +67,8 @@ class HistoryDownloader:
         self.event = event
         self.mkts = market_map(cfg)
         self.bar_delta = pd.Timedelta(hours=cfg.get("bar_hours", 4))
-        self.disabled = not self.s["enabled"] or not hasattr(broker, "bars_range")
+        self.disabled = True
+        self.attach(broker)
         self.status_path = self.dir / "status.json"
         self.status: dict = {}
         if self.status_path.exists():
@@ -75,6 +76,11 @@ class HistoryDownloader:
                 self.status = json.loads(self.status_path.read_text())
             except ValueError:
                 self.status = {}
+
+    def attach(self, broker) -> None:
+        """(Re)bind the broker: the live runner gets its IG client after construction."""
+        self.broker = broker
+        self.disabled = not self.s["enabled"] or not hasattr(broker, "bars_range")
 
     # ------------------------------------------------------------ files
     def _path(self, name: str) -> Path:

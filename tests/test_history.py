@@ -96,3 +96,15 @@ def test_live_runner_downloads_only_when_idle_and_never_breaks_trading(cfg, make
     assert r.tick(t) is True and r.history.disabled                  # trading loop carries on
     events = [json.loads(x) for x in (tmp_path / "logs" / "decisions.jsonl").read_text().splitlines()]
     assert any(e["event"] == "HISTORY_ERROR" for e in events)
+
+
+def test_history_binds_broker_assigned_after_construction(cfg, make_broker, tmp_path):
+    cfg, broker, _, now, _ = _setup(cfg, make_broker, tmp_path)
+    cfg = copy.deepcopy(cfg)
+    cfg["safety"]["kill_file"] = str(tmp_path / "KILL")
+    cfg["safety"]["pause_file"] = str(tmp_path / "PAUSE")
+    r = LiveRunner(cfg, None, tmp_path / "state", tmp_path / "logs", dry_run=True)   # as in main()
+    assert r.history.disabled
+    r.broker = broker
+    r.startup(now)
+    assert not r.history.disabled

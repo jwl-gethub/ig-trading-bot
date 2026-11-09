@@ -503,6 +503,7 @@ class LiveRunner:
     def startup(self, now: pd.Timestamp | None = None) -> None:
         now = now or pd.Timestamp.now(tz="UTC")
         self.broker.login()
+        self.history.attach(self.broker)          # broker is assigned after construction in main()
         self.check_account_type()
         self.sleeves.ensure_bases(self.broker.equity())
         self.warm_up(now)
