@@ -39,18 +39,21 @@ def parse_bi5(raw: bytes, d: date) -> np.ndarray:
     return arr
 
 
-def _fetch(session: requests.Session, inst: str, d: date, tries: int = 6) -> np.ndarray:
+def _fetch(session: requests.Session, inst: str, d: date, tries: int = 7) -> tuple[np.ndarray | None, str]:
+    """-> (records, last status). records is None when every try failed (caller retries later)."""
+    status = ""
     for i in range(tries):
         try:
             r = session.get(_url(inst, d), timeout=30)
+            status = str(r.status_code)
             if r.status_code == 404:
-                return np.empty((0, 6))
+                return np.empty((0, 6)), status
             if r.status_code == 200:
-                return parse_bi5(r.content, d)
-        except (requests.RequestException, lzma.LZMAError):
-            pass
-        time.sleep(1.5 * (i + 1))
-    raise RuntimeError(f"dukascopy: failed {inst} {d}")
+                return parse_bi5(r.content, d), status
+        except (requests.RequestException, lzma.LZMAError) as exc:
+            status = type(exc).__name__
+        time.sleep(min(60, 2 ** i))
+    return None, status
 
 
 def to_frame(arr: np.ndarray, price_range: tuple[float, float]) -> pd.DataFrame:
@@ -74,7 +77,7 @@ def to_frame(arr: np.ndarray, price_range: tuple[float, float]) -> pd.DataFrame:
 
 
 def load_range(inst: str, start: date, end: date, cache_dir: Path, price_range: tuple[float, float],
-               workers: int = 6, log=print) -> pd.DataFrame:
+               workers: int = 3, log=print) -> pd.DataFrame:
     """Download (or read from cache) every weekday between start and end, one CSV.gz per month."""
     cache_dir = Path(cache_dir) / inst
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -92,13 +95,20 @@ def load_range(inst: str, start: date, end: date, cache_dir: Path, price_range: 
         days = [d.date() for d in pd.date_range(max(m.start_time.date(), start), last_day, freq="D")
                 if d.weekday() < 5]
         with ThreadPoolExecutor(workers) as ex:
-            arrs = list(ex.map(lambda d: _fetch(session, inst, d), days))
-        arr = np.vstack([a for a in arrs if len(a)]) if any(len(a) for a in arrs) else np.empty((0, 6))
-        df = to_frame(arr, price_range)
-        if complete_month:
+            got = dict(zip(days, ex.map(lambda d: _fetch(session, inst, d), days)))
+        failed = [d for d, (a, _) in got.items() if a is None]
+        for d in failed:                                   # slow second pass
+            time.sleep(5)
+            got[d] = _fetch(session, inst, d)
+        still = {str(d): got[d][1] for d in failed if got[d][0] is None}
+        arrs = [a for a, _ in got.values() if a is not None and len(a)]
+        df = to_frame(np.vstack(arrs), price_range) if arrs else to_frame(np.empty((0, 6)), price_range)
+        if complete_month and not still:
             df.to_csv(f, compression="gzip")
         frames.append(df)
-        log({"event": "DOWNLOADED", "instrument": inst, "month": str(m), "rows": int(len(df))})
+        log({"event": "DOWNLOADED", "instrument": inst, "month": str(m), "rows": int(len(df)),
+             "missing_days": still or None})
+        time.sleep(0.5)
     out = pd.concat(frames).sort_index()
     out.index = pd.to_datetime(out.index, utc=True)
     return out[~out.index.duplicated(keep="last")]
