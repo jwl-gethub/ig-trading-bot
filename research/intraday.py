@@ -14,6 +14,8 @@ from dataclasses import asdict, replace
 from datetime import date
 from pathlib import Path
 
+import pandas as pd
+
 from .dukascopy import load_range
 from .noise_area import Params, backtest, buy_and_hold, last_half_hour, metrics, session_matrix
 
@@ -43,7 +45,16 @@ def variants(cost: float) -> dict[str, Params]:
     }
 
 
+def portfolio(dailies: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Equal capital per market, decided in advance (no picking winners): each market's own
+    vol-targeted return, averaged across the markets on every trading day."""
+    wide = pd.concat({m: d.set_index("day").ret for m, d in dailies.items()}, axis=1).fillna(0.0)
+    lev = pd.concat({m: d.set_index("day").lev for m, d in dailies.items()}, axis=1).mean(axis=1)
+    return pd.DataFrame({"day": wide.index, "ret": wide.mean(axis=1).to_numpy(), "lev": lev.to_numpy()})
+
+
 def run(markets: list[str], cache: Path) -> None:
+    collected: dict[str, dict] = {}
     for name in markets:
         spec = MARKETS[name]
         t0 = time.time()
@@ -66,11 +77,21 @@ def run(markets: list[str], cache: Path) -> None:
         for vname, fn in runs.items():
             trades, daily = fn()
             p = vs.get(vname, base)
+            collected.setdefault(vname, {})[name] = (trades, daily)
             for per, (a, b) in PERIODS.items():
                 m = metrics(trades, daily, a, b)
                 log({"event": "RESULT", "market": name, "variant": vname, "period": per,
                      "buy_and_hold_pct": buy_and_hold(sm, a, b), **m,
                      "params": asdict(p) if per == "full" else None})
+    for vname in ("paper_rules", "live_twap_stop"):
+        got = collected.get(vname, {})
+        if len(got) < 2:
+            continue
+        daily = portfolio({m: d for m, (_, d) in got.items()})
+        trades = pd.concat([t.assign(acct_ret=t.acct_ret / len(got)) for t, _ in got.values() if len(t)])
+        for per, (a, b) in PERIODS.items():
+            log({"event": "RESULT", "market": "PORTFOLIO_" + "+".join(got), "variant": vname,
+                 "period": per, **metrics(trades, daily, a, b)})
 
 
 def main() -> None:
