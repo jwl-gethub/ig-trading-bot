@@ -109,8 +109,14 @@ class RiskManager:
 
     def size(self, equity: float, stop_points: float, point_value: float,
              min_size: float, size_step: float, risk_pct: float | None = None,
-             max_size: float | None = None) -> SizeResult:
-        """Stake = equity x risk% / stop, rounded DOWN. `max_size` (e.g. a leverage cap) can only shrink it."""
+             max_size: float | None = None, min_size_max_risk_pct: float | None = None) -> SizeResult:
+        """Stake = equity x risk% / stop, rounded DOWN. `max_size` (e.g. a leverage cap) can only shrink it.
+
+        `min_size_max_risk_pct`: when the normal stake is below the broker's minimum, the minimum
+        stake is allowed if it risks no more than this % of equity (human-set per sleeve, e.g. gold's
+        £1/pt minimum). It never raises a stake that already meets the minimum, and the leverage cap
+        and every account-level check still apply on top.
+        """
         if equity <= 0:
             return SizeResult(False, reason="NO_EQUITY")
         if not stop_points or stop_points <= 0 or math.isnan(stop_points):
@@ -127,6 +133,10 @@ class RiskManager:
             return SizeResult(False, reason=f"LEVERAGE_CAP: room for {max(raw, 0):.2f} < min size {min_size}")
         if size < min_size:
             at_min = min_size * stop_points * point_value
+            tol = float(min_size_max_risk_pct) if min_size_max_risk_pct else 0.0
+            if tol > pct and at_min <= equity * tol / 100 + 1e-9:
+                return SizeResult(True, size=min_size, risk_amount=at_min,
+                                  reason=f"MIN_SIZE_TOLERANCE: {100 * at_min / equity:.2f}% <= {tol:.2f}%")
             return SizeResult(
                 False,
                 reason=(

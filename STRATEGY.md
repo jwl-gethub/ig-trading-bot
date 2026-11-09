@@ -152,7 +152,16 @@ The account is split into independent virtual pots, so the strategies don't comp
 
 **Config validation:** sleeve weights must sum to ≤ 1. Each module belongs to one sleeve only. weight × sleeve risk must be ≤ the 2% per-trade ceiling. Sleeve hard limits: risk ≤ 10% of the sleeve, leverage ≤ 30×, drawdown ≤ 80%.
 
-**Consequence at these sizes:** at 1% of £4,500 (£45 per trade), FTSE 100's minimum stake (about £72 at risk) no longer fits the trend and mean-reversion sleeves. Those sleeves trade FX and gold. The leveraged sleeve (£100 per trade) can still take FTSE sweeps.
+**Consequence at these sizes:** this is from IG demo feasibility on 2026-11-08. FX and the indices fit every sleeve; their minimum stakes are around 0.03–0.04 per point. Gold, silver and copper have a minimum stake of £1 per point. With 2×ATR stops on 4H bars, gold's minimum risks about £72–76, which is 1.6–1.7% of the £4,500 trend sleeve. Silver's minimum risks about £168 and copper's about £268.
+
+**Minimum-stake ceiling (`min_size_max_risk_pct`, trend sleeve: 2%; approved by the human 2026-11-09):**
+- It applies only when the normal stake falls below IG's minimum.
+- The bot then takes the minimum stake only if it risks ≤ 2% of the sleeve (about £90). Otherwise it skips the trade as before.
+- It never raises a stake that already meets the minimum.
+- It halves on a sleeve loss streak, and halves in the first live phase.
+- The leverage cap and every account-level check still apply.
+- Such entries are logged with `min_size_trade: true`.
+- In effect, this unlocks gold for the trend sleeve. Silver and copper stay skipped.
 
 ## 8. Small-capital reality
 

@@ -26,6 +26,7 @@ def test_live_risk_capped_until_approved(cfg):
     assert cfg["risk"]["risk_per_trade_pct"] == cfg["promotion"]["live_initial_risk_per_trade_pct"]
     for n, sp in cfg["sleeves"].items():                       # sleeves halved too (1% -> 0.5%)
         assert sp["risk_per_trade_pct"] == before[n] / 2
+    assert cfg["sleeves"]["trend"]["min_size_max_risk_pct"] == 1.0   # min-stake ceiling halved too
 
 
 def test_orders_without_stop_are_refused(cfg):
@@ -269,7 +270,10 @@ def test_live_sleeves_trade_independently_and_persist(cfg, make_broker, tmp_path
         if e["sleeve"] == "leveraged":
             assert e["exposure_x"] <= 20.0 + 1e-6 and e["risk"] <= 0.10 * e["sleeve_equity"] + 1e-6
         else:
-            assert e["exposure_x"] <= 3.0 + 1e-6 and e["risk"] <= 0.01 * e["sleeve_equity"] + 1e-6
+            cap = (cfg["sleeves"][e["sleeve"]].get("min_size_max_risk_pct") or 1.0) if e["min_size_trade"] else 1.0
+            assert e["exposure_x"] <= 3.0 + 1e-6 and e["risk"] <= cap / 100 * e["sleeve_equity"] + 1e-6
+            if e["min_size_trade"]:
+                assert e["sleeve"] == "trend" and e["risk"] > 0.01 * e["sleeve_equity"]
     # positions are keyed per sleeve, and sleeve state survives a restart
     assert all(":" in k for k in r.positions)
     r2 = LiveRunner(r.cfg, broker, tmp_path / "state", tmp_path / "logs", dry_run=False)

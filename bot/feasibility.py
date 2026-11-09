@@ -21,7 +21,8 @@ from .indicators import compute_all
 
 
 def feasibility_row(name: str, equity: float, risk_pct: float, min_size: float,
-                    stop_points: float, point_value: float, spread: float | None = None) -> dict:
+                    stop_points: float, point_value: float, spread: float | None = None,
+                    min_size_max_risk_pct: float | None = None) -> dict:
     risk_at_min = min_size * stop_points * point_value
     pct_at_min = 100 * risk_at_min / equity if equity else float("inf")
     need = risk_at_min / (risk_pct / 100)
@@ -33,7 +34,9 @@ def feasibility_row(name: str, equity: float, risk_pct: float, min_size: float,
         "risk_at_min_%": round(pct_at_min, 2),
         "equity_needed_£": round(need, 0),
         "spread_%_of_stop": round(100 * spread / stop_points, 1) if spread else None,
-        "verdict": "OK" if pct_at_min <= risk_pct else "SKIP (too small)",
+        "verdict": ("OK" if pct_at_min <= risk_pct
+                    else "OK (min stake)" if min_size_max_risk_pct and pct_at_min <= min_size_max_risk_pct
+                    else "SKIP (too small)"),
     }
 
 

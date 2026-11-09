@@ -235,6 +235,8 @@ sleeves:
     modules: [trend]
     weight: 0.45              # £4,500
     risk_per_trade_pct: 1.0
+    min_size_max_risk_pct: 2.0  # approved by Wissam 2026-11-09: if IG's minimum stake (e.g. gold £1/pt)
+                                # risks more than 1%, take the minimum only if it risks <= 2% (~£90)
     max_leverage: 3
     max_open_positions: 2
     max_positions_per_group: 1

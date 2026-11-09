@@ -124,6 +124,16 @@ class Sleeves:
             pct /= 2
         return pct
 
+    def min_size_max_risk_pct(self, name: str) -> float | None:
+        """Optional human-set ceiling for taking the broker's minimum stake (halved on a loss streak)."""
+        v = self.spec[name].get("min_size_max_risk_pct")
+        if not v:
+            return None
+        pct = float(v)
+        if self.states[name].loss_streak >= self.r["loss_streak_halve_risk"]:
+            pct /= 2
+        return pct
+
     def max_size_by_leverage(self, name: str, equity: float, positions: Iterable,
                              price: float, point_value: float) -> float:
         cap = float(self.spec[name].get("max_leverage", math.inf)) * max(equity, 0.0)
@@ -200,6 +210,15 @@ def validate_sleeves(cfg: dict) -> None:
         acct_risk = float(s["weight"]) * float(s["risk_per_trade_pct"])
         if acct_risk > cap + 1e-9:
             raise ConfigError(f"sleeve {name}: one trade risks {acct_risk:.2f}% of the account > {cap}% ceiling")
+        tol = s.get("min_size_max_risk_pct")
+        if tol is not None:
+            tol = float(tol)
+            if tol < float(s["risk_per_trade_pct"]) or tol > SLEEVE_HARD_LIMITS["risk_per_trade_pct"]:
+                raise ConfigError(f"sleeve {name}: min_size_max_risk_pct={tol} must be between "
+                                  f"risk_per_trade_pct and {SLEEVE_HARD_LIMITS['risk_per_trade_pct']}")
+            if float(s["weight"]) * tol > cap + 1e-9:
+                raise ConfigError(f"sleeve {name}: a min-size trade could risk {s['weight'] * tol:.2f}% "
+                                  f"of the account > {cap}% ceiling")
         for m in s["modules"]:
             if m in seen:
                 raise ConfigError(f"module {m} is in two sleeves ({seen[m]}, {name})")

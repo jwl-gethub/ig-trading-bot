@@ -20,7 +20,7 @@ Build and maintain a deterministic, rule-based trading bot for the IG REST API. 
 5. **`risk:`, `safety:` and `sleeves:` limits are ceilings.**
    - Never raise them, and never raise `HARD_LIMITS` in `bot/config.py` or `SLEEVE_HARD_LIMITS` in `bot/sleeves.py`.
    - Never add a code path that bypasses `RiskManager.size()` or `RiskManager.check_entry()`.
-6. **Sizing comes only from `bot/risk.py`.** If IG's minimum stake would exceed the risk cap, skip the trade. Never round up.
+6. **Sizing comes only from `bot/risk.py`.** If IG's minimum stake would exceed the risk cap, skip the trade. Never round up. The one exception is a sleeve's human-set `min_size_max_risk_pct` (approved by the human on 2026-11-09). The minimum stake may be taken only if it risks no more than that %. Never add or raise that key yourself.
 7. **Circuit breakers must always work:** the KILL file, PAUSE file, daily and weekly loss limits, the max-drawdown halt and the loss-streak pause. A halt is cleared only by a human (`--reset-halt`).
 8. **Secrets** come only from env vars or `.env` (gitignored). Never print, log or commit the API key, password, `CST` or `X-SECURITY-TOKEN`. Never log request headers.
 9. **No LLM or AI calls in the trading path.** Decisions are deterministic code. Kronos (`bot/kronos_shadow.py`) runs in shadow mode only. Its forecasts may be recorded and scored, never used to open, size or close trades without the strategy-change protocol and human approval.

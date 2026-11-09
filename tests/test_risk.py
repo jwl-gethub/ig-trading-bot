@@ -118,3 +118,23 @@ def test_hard_limits_reject_risky_config(cfg):
     bad["markets"] = [dict(cfg["markets"][0], modules=["martingale"])]
     with pytest.raises(ConfigError):
         validate(bad)
+
+
+def test_min_size_tolerance_takes_minimum_only_within_its_ceiling(cfg):
+    r = rm(cfg)
+    # Gold this morning: £4,500 pot, 1% cap, min stake 1.0, 76-pt stop -> £76 = 1.69%
+    off = r.size(4_500, 76, 1.0, min_size=1.0, size_step=0.01, risk_pct=1.0)
+    assert not off.ok and off.reason.startswith("UNSIZEABLE")
+    on = r.size(4_500, 76, 1.0, min_size=1.0, size_step=0.01, risk_pct=1.0, min_size_max_risk_pct=2.0)
+    assert on.ok and on.size == 1.0 and on.risk_amount == 76 and on.reason.startswith("MIN_SIZE_TOLERANCE")
+    # silver: min stake risks 3.7% -> still skipped
+    assert not r.size(4_500, 168, 1.0, 1.0, 0.01, risk_pct=1.0, min_size_max_risk_pct=2.0).ok
+    # never changes a stake that already meets the minimum
+    normal = r.size(4_500, 30, 1.0, 1.0, 0.01, risk_pct=1.0, min_size_max_risk_pct=2.0)
+    assert normal.ok and normal.size == 1.5 and normal.reason == "OK"
+
+
+def test_min_size_tolerance_never_beats_the_leverage_cap(cfg):
+    r = rm(cfg)
+    res = r.size(4_500, 76, 1.0, 1.0, 0.01, risk_pct=1.0, max_size=0.5, min_size_max_risk_pct=2.0)
+    assert not res.ok and res.reason.startswith("LEVERAGE_CAP")

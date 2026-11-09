@@ -219,7 +219,8 @@ class Backtester:
                     s_eq = sleeve_eq[sn]
                     lev_room = sleeves.max_size_by_leverage(sn, s_eq, exposures, row["close"], mkt["point_value"])
                     sz = self.risk.size(s_eq, sig.stop_distance, mkt["point_value"], mkt["min_size"],
-                                        mkt["size_step"], risk_pct=sleeves.risk_pct(sn), max_size=lev_room)
+                                        mkt["size_step"], risk_pct=sleeves.risk_pct(sn), max_size=lev_room,
+                                        min_size_max_risk_pct=sleeves.min_size_max_risk_pct(sn))
                     if not sz.ok:
                         rejections[_reason_key(sz.reason)] += 1
                         continue

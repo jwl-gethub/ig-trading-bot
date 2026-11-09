@@ -75,6 +75,8 @@ def apply_live_risk_cap(cfg: dict, env: str) -> None:
         cfg["risk"]["risk_per_trade_pct"] = min(base, cap)
         for sleeve in (cfg.get("sleeves") or {}).values():   # sleeves size from their own %, scale them too
             sleeve["risk_per_trade_pct"] = sleeve["risk_per_trade_pct"] * factor
+            if sleeve.get("min_size_max_risk_pct"):
+                sleeve["min_size_max_risk_pct"] = sleeve["min_size_max_risk_pct"] * factor
 
 
 def assert_order_safe(order: dict) -> None:
@@ -429,9 +431,11 @@ class LiveRunner:
             return reject(f"SPREAD_TOO_COSTLY {info.spread:.2f} > {pct_cap}% of stop {stop_dist:.1f}")
         room = self.sleeves.max_size_by_leverage(sleeve, s_eq, positions, info.mid, mkt["point_value"])
         sz = self.risk.size(s_eq, stop_dist, mkt["point_value"], info.min_size, mkt["size_step"],
-                            risk_pct=self.sleeves.risk_pct(sleeve), max_size=room)
+                            risk_pct=self.sleeves.risk_pct(sleeve), max_size=room,
+                            min_size_max_risk_pct=self.sleeves.min_size_max_risk_pct(sleeve))
         if not sz.ok:
             return reject(sz.reason)
+        at_min = sz.reason.startswith("MIN_SIZE_TOLERANCE")
         ok, why = self.sleeves.check(sleeve, now, name, mkt["group"], positions)
         if not ok:
             return reject(why)
@@ -456,7 +460,7 @@ class LiveRunner:
         assert_order_safe(order)
         if self.dry_run:
             self.event("DRY_RUN_ORDER", market=name, sleeve=sleeve, risk=round(sz.risk_amount, 2),
-                       sleeve_equity=round(s_eq, 2), **order)
+                       sleeve_equity=round(s_eq, 2), min_size_trade=at_min, **order)
             return
         self.risk.on_order_sent()
         res = self.broker.open_position(**order)
@@ -473,7 +477,8 @@ class LiveRunner:
         self.positions[sleeve_key(sleeve, name)] = prov
         self.event("OPENED", market=name, sleeve=sleeve, module=sig.module, deal_id=prov.deal_id, level=level,
                    stop=prov.stop_level, target=prov.target_level, size=sz.size, risk=round(sz.risk_amount, 2),
-                   sleeve_equity=round(s_eq, 2), exposure_x=round(notional / s_eq, 2) if s_eq else None)
+                   sleeve_equity=round(s_eq, 2), exposure_x=round(notional / s_eq, 2) if s_eq else None,
+                   min_size_trade=at_min)
 
     # ---------------- switches
     def kill_requested(self) -> bool:
@@ -575,7 +580,8 @@ class LiveRunner:
                         continue
                     s_eq = self.sleeves.equity(sn, positions, self.prices())
                     row = feasibility_row(name, s_eq, self.sleeves.risk_pct(sn), info.min_size, stop,
-                                          mkt["point_value"], spread)
+                                          mkt["point_value"], spread,
+                                          min_size_max_risk_pct=self.sleeves.min_size_max_risk_pct(sn))
                     self.event("FEASIBILITY", sleeve=sn, sleeve_equity=round(s_eq, 2), atr=round(a, 2),
                                median_tr_60=round(float(tr.median()), 2), max_tr_60=round(float(tr.max()), 2),
                                max_tr_bar=str(tr.idxmax()), bars=len(df), **row)

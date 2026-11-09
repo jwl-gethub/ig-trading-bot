@@ -30,6 +30,9 @@ def test_config_sleeves_are_10_45_45(cfg):
     lambda c: c["sleeves"]["leveraged"].update(risk_per_trade_pct=25),  # above sleeve hard limit
     lambda c: c["sleeves"]["trend"].update(risk_per_trade_pct=5),       # 0.45 x 5% = 2.25% of account > 2%
     lambda c: c["sleeves"]["leveraged"].update(max_leverage=50),        # above IG max
+    lambda c: c["sleeves"]["trend"].update(min_size_max_risk_pct=0.5),  # below the sleeve's own risk
+    lambda c: c["sleeves"]["trend"].update(min_size_max_risk_pct=5),    # 0.45 x 5% > 2% of account
+    lambda c: c["sleeves"]["leveraged"].update(min_size_max_risk_pct=12),  # above sleeve hard limit
 ])
 def test_sleeve_validation_rejects_risky_configs(cfg, mutate):
     bad = copy.deepcopy(cfg)
@@ -92,3 +95,12 @@ def test_sleeve_loss_streak_is_per_sleeve(cfg):
     for _ in range(4):
         s.on_trade_closed("leveraged", -100, TS)
     assert s.risk_pct("leveraged") == 5.0 and s.risk_pct("trend") == 1.0
+
+
+def test_min_size_tolerance_is_trend_only_and_halves_on_loss_streak(cfg):
+    s = Sleeves(cfg)
+    assert s.min_size_max_risk_pct("trend") == 2.0
+    assert s.min_size_max_risk_pct("meanrev") is None and s.min_size_max_risk_pct("leveraged") is None
+    for _ in range(4):
+        s.on_trade_closed("trend", -45, TS)
+    assert s.min_size_max_risk_pct("trend") == 1.0
