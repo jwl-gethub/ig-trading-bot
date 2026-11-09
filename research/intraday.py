@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from .dip import DipParams, backtest_dip
 from .dukascopy import load_range
 from .noise_area import Params, backtest, buy_and_hold, last_half_hour, metrics, session_matrix
 
@@ -94,11 +95,45 @@ def run(markets: list[str], cache: Path) -> None:
                  "period": per, **metrics(trades, daily, a, b)})
 
 
+def dip_variants(cost: float) -> dict[str, DipParams]:
+    b = DipParams(cost_side_points=cost)
+    return {
+        "dip_quick_next_open": b,                                   # Connors exit: close > 5-day SMA
+        "dip_quick_near_close": replace(b, fill="near_close"),
+        "dip_ride_next_open": replace(b, exit="ride"),              # let winners run: 3x ATR trail
+        "dip_ride_near_close": replace(b, exit="ride", fill="near_close"),
+        "dip_quick_no_stop": replace(b, stop_atr=None),             # Connors original (no stop)
+        "dip_quick_rsi10": replace(b, rsi_entry=10.0),              # sensitivity only
+        "dip_quick_2x": replace(b, leverage=2.0),                   # what leverage does to it
+    }
+
+
+def run_dip(markets: list[str], cache: Path) -> None:
+    for name in markets:
+        spec = MARKETS[name]
+        sm = session_matrix(load_range(spec["inst"], START, END, cache, spec["range"], log=log), name)
+        for vname, p in dip_variants(spec["cost_side"]).items():
+            trades, daily = backtest_dip(sm, p)
+            extra = {}
+            if len(trades):
+                extra = {"avg_days_held": round(float(trades.days_held.mean()), 1),
+                         "avg_trade_pct": round(100 * float(trades.acct_ret.mean()), 3),
+                         "worst_trade_pct": round(100 * float(trades.acct_ret.min()), 2)}
+            for per, (a, b) in PERIODS.items():
+                m = metrics(trades, daily, a, b)
+                log({"event": "RESULT", "market": name, "variant": vname, "period": per,
+                     "buy_and_hold_pct": buy_and_hold(sm, a, b), **m, **(extra if per == "full" else {}),
+                     "params": asdict(p) if per == "full" else None})
+
+
 def main() -> None:
     cache = Path(os.environ.get("RESEARCH_CACHE", "/data/duka"))
     markets = [m for m in os.environ.get("RESEARCH_MARKETS", ",".join(MARKETS)).split(",") if m]
     log({"event": "START", "markets": markets, "cache": str(cache)})
     try:
+        dip_markets = [m for m in os.environ.get("RESEARCH_DIP_MARKETS", "US500,USTECH").split(",") if m]
+        run_dip(dip_markets, cache)
+        log({"event": "DIP_DONE", "markets": dip_markets})
         run(markets, cache)
     except Exception as exc:
         log({"event": "ERROR", "error": repr(exc)})
