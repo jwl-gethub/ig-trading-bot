@@ -120,6 +120,12 @@ The rules come from Connors & Alvarez, published around 2008. The research is in
 - **Signal data:** Dukascopy hourly history, which is free and uses no IG allowance. If a close isn't published yet, the bot retries every 15 minutes. After 3 hours it skips that day.
 - **Orders:** go through the same sizing, RiskManager checks, dry-run and kill/pause path as every other module.
 - **Markets:** only those that passed the pre-committed screen are traded: ≥ 20 trades, profit factor ≥ 1.3, and positive in both 2019–22 and 2023–26.
+  - Screen results, 2026-11-09, unlevered with IG costs. 22 markets were tested.
+    - **Pass, strong:** US500 (PF 2.42) and US Tech 100 (PF 1.88). Equity drift gives these a structural reason to work.
+    - **Pass, thin:** EURJPY (PF 1.86), GBPUSD (1.67), NZDUSD (1.54), GOLD (1.51) and BRENT (2.23). Brent's result is mostly 2020, and it is not added: unknown epic, and the £1/pt minimum is unsizeable.
+    - **Fail:** US30, GER40, FRA40, EU50, UK100, EURUSD, USDJPY, AUDUSD, USDCAD, USDCHF, EURGBP, GBPJPY and SILVER.
+  - With 22 markets tested, one or two "thin" passes are expected by chance. The learning loop and the weekly review should judge them on live results.
+  - IG's minimum stake is £1/pt for GOLD and NZDUSD. A dip trade there would risk about £90–160 against the £40 cap, so those signals are logged and skipped (UNSIZEABLE).
 - **Sleeve:** `dip`, 40% of the account, approved by the human on 2026-11-09. Trend went to 30% and mean reversion to 20%. The slices are re-cut from the same account reference, never added on top.
 
 ## 7. Risk and position sizing (`bot/risk.py`)
