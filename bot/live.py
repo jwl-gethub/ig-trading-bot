@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import threading
 import logging
 import os
 import signal
@@ -42,6 +43,7 @@ from .feasibility import feasibility_row
 from .indicators import compute_all, true_range
 from .risk import RiskManager, RiskState
 from .sleeves import Sleeves, sleeve_key
+from .dip_live import DipEngine, is_dip
 from .history import HistoryDownloader
 from .kronos_shadow import KronosShadow
 from .learning import append_journal, journal_record, load_journal, review
@@ -150,12 +152,16 @@ def load_dotenv(path: str = ".env") -> None:
 
 
 # ---------------------------------------------------------------- runner
+BAR_MODULES = {"trend", "meanrev", "sweep"}
+
+
 class LiveRunner:
     def __init__(self, cfg: dict, broker, state_dir: str | Path = "state", log_dir: str | Path = "logs",
                  dry_run: bool | None = None):
         self.cfg = cfg
         self.broker = broker
         self.mkts = market_map(cfg)
+        self.bar_markets = {n: m for n, m in self.mkts.items() if set(m["modules"]) & BAR_MODULES}
         self.strategy = Strategy(cfg["strategy"])
         self.dry_run = cfg["safety"]["dry_run"] if dry_run is None else dry_run
         self.bar_delta = pd.Timedelta(hours=cfg.get("bar_hours", 4))
@@ -172,7 +178,10 @@ class LiveRunner:
         self.kronos = KronosShadow(cfg, self.log_dir, self.state_dir)
         self.history = HistoryDownloader(cfg, broker, self.state_dir, self.log_dir, self.event)
         self._info_cache: dict[str, tuple] = {}
+        self.dip_prices: dict[str, float] = {}
+        self.dip_done: dict[str, str] = {}
         self._load_state()
+        self.dip = DipEngine(self)
 
     # ---------------- persistence & logging
     @property
@@ -191,12 +200,14 @@ class LiveRunner:
                     pos.sleeve = self.sleeves.by_module.get(pos.module, self.sleeves.names()[0])
                 self.positions[sleeve_key(pos.sleeve, pos.market)] = pos
             self.last_bar = d.get("last_bar", {})
+            self.dip_done = d.get("dip_done", {})
 
     def save_state(self) -> None:
         d = {"risk": self.risk.state.to_dict(),
              "sleeves": self.sleeves.to_dict(),
              "positions": {k: v.to_dict() for k, v in self.positions.items()},
-             "last_bar": self.last_bar}
+             "last_bar": self.last_bar,
+             "dip_done": self.dip_done}
         tmp = self._state_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(d, indent=2))
         tmp.replace(self._state_file)
@@ -225,7 +236,8 @@ class LiveRunner:
         return pnl
 
     def prices(self) -> dict[str, float]:
-        return {m: float(df["close"].iloc[-1]) for m, df in self.bars.items() if len(df)}
+        bar = {m: float(df["close"].iloc[-1]) for m, df in self.bars.items() if len(df)}
+        return {**self.dip_prices, **bar}
 
     def sleeve_summary(self) -> dict:
         return self.sleeves.summary(self.positions.values(), self.prices())
@@ -268,7 +280,7 @@ class LiveRunner:
 
     def warm_up(self, now: pd.Timestamp) -> None:
         need = int(self.cfg["warmup_bars"])
-        for name, mkt in self.mkts.items():
+        for name, mkt in self.bar_markets.items():
             cached = pd.DataFrame()
             if self._cache_path(name).exists():
                 cached = pd.read_csv(self._cache_path(name), index_col=0, parse_dates=True)
@@ -289,7 +301,7 @@ class LiveRunner:
     def refresh(self, now: pd.Timestamp) -> list[str]:
         """Fetch only when a new bar should have closed. Returns markets with a new closed bar."""
         updated = []
-        for name, mkt in self.mkts.items():
+        for name, mkt in self.bar_markets.items():
             if now < self.next_check.get(name, now):
                 continue
             fresh = self._closed_only(self.broker.bars(mkt["epic"], self.cfg["timeframe"], 3), now)
@@ -362,7 +374,7 @@ class LiveRunner:
             return
         res = self.broker.close_position(pos.deal_id, "BUY" if pos.direction == 1 else "SELL", pos.size)
         if res.get("status") == "ACCEPTED":
-            px = float(res.get("level") or self.bars[pos.market]["close"].iloc[-1])
+            px = float(res.get("level") or self.prices().get(pos.market, pos.entry_price))
             pnl = self._journal(pos, px, reason, now)
             self.event("CLOSED", market=pos.market, sleeve=pos.sleeve, reason=reason, level=px,
                        pnl_est=round(pnl, 2))
@@ -418,6 +430,11 @@ class LiveRunner:
         sig = self.strategy.entry_signal({**mkt, "modules": mods}, row)
         if not sig:
             return
+        self._place_entry(name, sleeve, sig, row, equity, now)
+
+    def _place_entry(self, name: str, sleeve: str, sig, row: dict, equity: float, now) -> None:
+        """Every entry, from any strategy, goes through here: sizing, risk checks, stop, order."""
+        mkt = self.mkts[name]
         info, crowd_long = self._market_context(mkt["epic"])
         spread = info.spread if info.spread == info.spread else None
         features = entry_features(sig, row, now, crowd_long_pct=crowd_long, spread=spread, sleeve=sleeve)
@@ -505,10 +522,16 @@ class LiveRunner:
         self.broker.login()
         self.history.attach(self.broker)          # broker is assigned after construction in main()
         self.check_account_type()
-        self.sleeves.ensure_bases(self.broker.equity())
+        changes = self.sleeves.ensure_bases(self.broker.equity())
+        if changes:
+            self.event("SLEEVES_REBASED", changes=changes,
+                       note="sleeve weights changed in config; slices re-cut from the same account reference")
         self.warm_up(now)
         self.reconcile(now)
         self.event("SLEEVES", **self.sleeve_summary())
+        if self.dip.enabled:
+            self.dip.check_markets()
+            threading.Thread(target=self.dip.prefetch, args=(now,), daemon=True, name="dip-prefetch").start()
         self.log_feasibility()
         self.log_market_search()
         self.kronos_selftest()
@@ -592,7 +615,7 @@ class LiveRunner:
         try:
             t = self.cfg["strategy"]["trend"]
             positions = list(self.positions.values())
-            for name, mkt in self.mkts.items():
+            for name, mkt in self.bar_markets.items():
                 df = self.bars.get(name)
                 if df is None or len(df) < 30:
                     continue
@@ -630,6 +653,10 @@ class LiveRunner:
             return False
 
         self.maybe_learn(now)
+        try:
+            self.dip.tick(now)
+        except Exception as exc:          # the daily strategy must never take down the 4H bot
+            self.event("DIP_ERROR", error=repr(exc))
         updated = self.refresh(now)
         if not updated:
             self._background(now)
@@ -654,7 +681,7 @@ class LiveRunner:
                 self.event("NOT_ENOUGH_BARS", market=name, bars=len(df))
                 continue
             row = compute_all(df, self.cfg["strategy"]).iloc[-1].to_dict()
-            for key in [k for k, p in self.positions.items() if p.market == name]:
+            for key in [k for k, p in self.positions.items() if p.market == name and not is_dip(p)]:
                 self._manage(key, row, now)
             for sn in self.sleeves.names():
                 if sleeve_key(sn, name) not in self.positions:

@@ -9,7 +9,7 @@ A rule-based 4H trading bot for an IG UK spread betting account. It combines a r
 | `STRATEGY.md` | Exact trading rules |
 | `config.yaml` | Markets, parameters, risk limits, safety switches |
 | `bot/` | Reference implementation: indicators, strategy, risk, backtester, IG client, live loop |
-| `tests/` | 118 tests, including guardrail tests, a no-lookahead check and random-walk "no fake edge" checks |
+| `tests/` | 138 tests, including guardrail tests, a no-lookahead check and random-walk "no fake edge" checks |
 | `bot/history.py` | Downloads real IG price history when the bot is idle (keeps 1,500 allowance points for live trading), then backtests the exact live rules on it; results in the `BACKTEST_REPORT` log event and `logs/backtest_report.json` |
 | `research/` | Separate research service (no IG credentials, cannot trade): downloads free 1-min index data from Dukascopy and validates the intraday noise-area strategy before/after its 2024 publication |
 | `DEPLOY.md` | Run it 24/5 on Railway, with phone-controllable kill, pause and dry-run switches |

@@ -43,6 +43,7 @@ class SleeveState:
     pause_until: str = ""
     halted: bool = False
     halt_reason: str = ""
+    ref: float = 0.0           # account equity the slices are cut from (same for every sleeve)
 
 
 def _ts(x) -> pd.Timestamp:
@@ -80,11 +81,25 @@ class Sleeves:
         mine = set(self.spec[name]["modules"])
         return [m for m in market_modules if m in mine]
 
-    def ensure_bases(self, account_equity: float) -> None:
+    def ensure_bases(self, account_equity: float) -> list[dict]:
+        """Give each sleeve its slice of the account. All slices share one reference equity (the
+        account size when the sleeves were first funded), so when the human changes `weight`s the
+        slices are re-cut from the same pot instead of inventing money. Returns any re-cuts."""
+        ref = next((st.ref for st in self.states.values() if st.ref > 0), 0.0)
+        if ref <= 0:
+            funded = [st.base for st in self.states.values() if st.base > 0]
+            ref = round(sum(funded), 2) if funded else round(account_equity, 2)
+        changes = []
         for n, st in self.states.items():
+            target = round(float(self.spec[n]["weight"]) * ref, 2)
             if st.base <= 0:
-                st.base = round(self.spec[n]["weight"] * account_equity, 2)
-                st.peak = st.base
+                st.base, st.peak = target, target
+            elif abs(st.base - target) > 0.01:
+                changes.append({"sleeve": n, "old_base": st.base, "new_base": target})
+                st.peak = max(0.0, st.peak - st.base + target)
+                st.base = target
+            st.ref = ref
+        return changes
 
     def to_dict(self) -> dict:
         return {n: asdict(st) for n, st in self.states.items()}

@@ -59,9 +59,18 @@ def validate(cfg: dict) -> dict:
         if m["name"] in names:
             raise ConfigError(f"duplicate market {m['name']}")
         names.add(m["name"])
-        bad = set(m["modules"]) - {"trend", "meanrev", "sweep"}
+        bad = set(m["modules"]) - {"trend", "meanrev", "sweep", "dip"}
         if bad:
             raise ConfigError(f"market {m['name']} unknown modules {bad}")
+        if "dip" in m["modules"]:
+            from .dip_live import SCHEDULES
+            d = m.get("dip") or {}
+            if not {"source", "price_range", "schedule"} <= set(d):
+                raise ConfigError(f"market {m['name']}: dip needs source, price_range, schedule")
+            if d["schedule"] not in SCHEDULES:
+                raise ConfigError(f"market {m['name']}: unknown dip schedule {d['schedule']}")
+            if len(d["price_range"]) != 2 or not 0 < d["price_range"][0] < d["price_range"][1]:
+                raise ConfigError(f"market {m['name']}: bad dip price_range")
         if m["min_size"] <= 0 or m["size_step"] <= 0 or m["point_value"] <= 0:
             raise ConfigError(f"market {m['name']} sizes/point_value must be > 0")
     from .sleeves import validate_sleeves

@@ -116,6 +116,7 @@ def test_backtest_runs_sleeves_independently(cfg):
         assert t.module in owners[t.sleeve]                 # each sleeve trades only its own strategy
     rep = sleeve_report(res)
     assert set(rep) == set(cfg["sleeves"])
-    assert rep["leveraged"]["start"] == 1_000 and rep["trend"]["start"] == 4_500
+    for sn, spec in cfg["sleeves"].items():                 # each slice = its weight x the account
+        assert rep[sn]["start"] == round(spec["weight"] * 10_000, 2)
     total_sleeves = sum(r["net_profit"] for r in rep.values() if "net_profit" in r)
     assert abs(total_sleeves - (res.equity.iloc[-1] - 10_000)) < 1.0   # sleeve P&L adds up to the account

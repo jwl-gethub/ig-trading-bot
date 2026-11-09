@@ -70,7 +70,7 @@ markets:
   - name: US500
     epic: IX.D.SPTRD.DAILY.IP
     group: equity_index
-    modules: [trend, meanrev, sweep]
+    modules: [trend, meanrev, sweep, dip]
     allow_short: false
     point_value: 1.0
     price_scale: 1.0
@@ -81,6 +81,11 @@ markets:
     backtest_spread_points: 0.8
     funding_long_pct: 6.5
     funding_short_pct: 2.5
+    dip:                        # daily RSI(2) dip module: passed the screen (research/dip_markets.py)
+      source: USA500IDXUSD      # Dukascopy history for signals (no IG allowance)
+      price_range: [1500, 12000]
+      schedule: us_index        # close 16:00 New York, fill 10:00 New York next weekday
+      long_only: true
 
   - name: GER40
     epic: IX.D.DAX.DAILY.IP
@@ -141,6 +146,27 @@ markets:
     backtest_spread_points: 30.0  # IG demo spread seen 2026-11-09 (wide)
     funding_long_pct: 5.0
     funding_short_pct: 3.0
+
+  - name: USTECH                # dip module only (no 4H bars, no IG history allowance)
+    epic: IX.D.NASDAQ.DAILY.IP  # US Tech 100 DFB; verified at startup (DIP_MARKET_OK / UNAVAILABLE)
+    group: equity_index
+    modules: [dip]
+    allow_short: false
+    point_value: 1.0
+    price_scale: 1.0
+    min_size: 0.04
+    size_step: 0.01
+    margin_pct: 5.0
+    max_spread_points: 4.0      # IG in-hours spread ~1; fills are at 10:00 New York
+    backtest_spread_points: 1.0
+    funding_long_pct: 6.5
+    funding_short_pct: 0.0
+    dip:
+      source: USATECHIDXUSD
+      price_range: [4000, 40000]
+      schedule: us_index
+      long_only: true
+      search: US Tech 100
 
 # Palladium: IG has no undated spot market, only dated futures (expiring contracts).
 # Not added until the bot handles contract rollover.
@@ -233,7 +259,7 @@ sleeves:
     max_drawdown_pct: 50      # stops opening trades after losing half the sleeve
   trend:
     modules: [trend]
-    weight: 0.45              # £4,500
+    weight: 0.30              # £3,000 (was 0.45; re-cut 2026-11-09 for the dip sleeve)
     risk_per_trade_pct: 1.0
     min_size_max_risk_pct: 2.0  # approved by Wissam 2026-11-09: if IG's minimum stake (e.g. gold £1/pt)
                                 # risks more than 1%, take the minimum only if it risks <= 2% (~£90)
@@ -243,11 +269,19 @@ sleeves:
     max_drawdown_pct: 20
   meanrev:
     modules: [meanrev]
-    weight: 0.45              # £4,500
+    weight: 0.20              # £2,000 (was 0.45; re-cut 2026-11-09 for the dip sleeve)
     risk_per_trade_pct: 1.0
     max_leverage: 3
     max_open_positions: 2
     max_positions_per_group: 1
+    max_drawdown_pct: 20
+  dip:                        # daily RSI(2) dip, quick exit (STRATEGY.md 6c); added 2026-11-09 at Wissam's request
+    modules: [dip]
+    weight: 0.40              # £4,000
+    risk_per_trade_pct: 1.0   # £40 per trade at the 2.5x ATR stop
+    max_leverage: 3
+    max_open_positions: 3
+    max_positions_per_group: 2
     max_drawdown_pct: 20
 
 # ---------------------------------------------------------------------
@@ -290,6 +324,17 @@ kronos:
   samples: 5                   # averaged sample paths per forecast
   timeout_s: 300               # worker is killed after this; trading unaffected
   min_forecasts_for_verdict: 200
+
+# ---------------------------------------------------------------------
+# Daily dip module (bot/dip_live.py). Signals from Dukascopy hourly data; orders via IG.
+# ---------------------------------------------------------------------
+dip:
+  enabled: true
+  sleeve: dip
+  history_days: 420           # 200-day average + ATR need ~215 trading days
+  retry_minutes: 15           # if the previous close is not published yet
+  grace_hours: 3              # then skip the day (DIP_MISSED)
+  rules: {rsi_long: 5, rsi_short: 95, trend_sma: 200, exit_sma: 5, stop_atr: 2.5}
 
 # ---------------------------------------------------------------------
 # Real price history (bot/history.py): downloaded by the live bot when idle,

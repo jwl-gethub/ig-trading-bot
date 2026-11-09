@@ -259,7 +259,8 @@ def test_live_sleeves_trade_independently_and_persist(cfg, make_broker, tmp_path
     cfg = _cfg3(cfg)
     broker = make_broker(cfg, n_bars=1100, equity=10_000)
     r, start = _runner(cfg, broker, tmp_path, dry_run=False)
-    assert {n: st.base for n, st in r.sleeves.states.items()} == {"leveraged": 1000, "trend": 4500, "meanrev": 4500}
+    assert {n: st.base for n, st in r.sleeves.states.items()} == {"leveraged": 1000, "trend": 3000, "meanrev": 2000,
+                                                                  "dip": 4000}
     _run(r, broker, start, 600)
     events = [json.loads(x) for x in (tmp_path / "logs" / "decisions.jsonl").read_text().splitlines()]
     opened = [e for e in events if e["event"] == "OPENED"]

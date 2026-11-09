@@ -107,6 +107,21 @@ Added on 2026-11-08 from a price-action setup the owner shared. It is unproven a
 
 Any market type is allowed (trending, ranging or neutral), because the trend-context filter does the directional job. If several modules signal on the same bar, trend takes priority, then sweep, then mean reversion. A pure random-walk test shows no edge (−0.04R average over 1,830 trades), so the engine isn't inventing one.
 
+## 6c. Module D: daily RSI(2) dip, quick exit (`bot/dipbuy.py`, `bot/dip_live.py`)
+
+The rules come from Connors & Alvarez, published around 2008. The research is in `research/dip.py` and `research/dip_markets.py`. The live bot uses the same rules module as that research.
+
+- **Daily close:** a fixed local hour per market. US indices close at 16:00 New York, EU indices at 17:00 Berlin, the FTSE at 16:00 London, and FX and commodities at 17:00 New York.
+- **Long:** the close is above its 200-day simple average and RSI(2) is below 5.
+- **Short:** only for FX and commodities, never indices. The close is below its 200-day average and RSI(2) is above 95.
+- **Exit:** the first close back beyond the 5-day average. There is no profit target and no trailing stop. Research showed that "ride the winners" earned less and had twice the drawdown.
+- **Execution:** orders are filled the next weekday at a liquid hour: 10:00 New York, 10:00 Berlin, 09:00 London, or 08:00 London for FX and commodities.
+- **Server-side stop:** 2.5 × ATR(14) from the fill, set as a percentage so it converts to IG points. It never moves.
+- **Signal data:** Dukascopy hourly history, which is free and uses no IG allowance. If a close isn't published yet, the bot retries every 15 minutes. After 3 hours it skips that day.
+- **Orders:** go through the same sizing, RiskManager checks, dry-run and kill/pause path as every other module.
+- **Markets:** only those that passed the pre-committed screen are traded: ≥ 20 trades, profit factor ≥ 1.3, and positive in both 2019–22 and 2023–26.
+- **Sleeve:** `dip`, 40% of the account, approved by the human on 2026-11-09. Trend went to 30% and mean reversion to 20%. The slices are re-cut from the same account reference, never added on top.
+
 ## 7. Risk and position sizing (`bot/risk.py`)
 
 **Stake per point** = (equity × risk%) ÷ stop distance in points. It is rounded **down** to the size step. If IG's minimum stake would risk more than the cap, the trade is **skipped**, never rounded up.

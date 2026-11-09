@@ -23,7 +23,7 @@ Build and maintain a deterministic, rule-based trading bot for the IG REST API. 
 6. **Sizing comes only from `bot/risk.py`.** If IG's minimum stake would exceed the risk cap, skip the trade. Never round up. The one exception is a sleeve's human-set `min_size_max_risk_pct` (approved by the human on 2026-11-09). The minimum stake may be taken only if it risks no more than that %. Never add or raise that key yourself.
 7. **Circuit breakers must always work:** the KILL file, PAUSE file, daily and weekly loss limits, the max-drawdown halt and the loss-streak pause. A halt is cleared only by a human (`--reset-halt`).
 8. **Secrets** come only from env vars or `.env` (gitignored). Never print, log or commit the API key, password, `CST` or `X-SECURITY-TOKEN`. Never log request headers.
-9. **No LLM or AI calls in the trading path.** Decisions are deterministic code. Kronos (`bot/kronos_shadow.py`) runs in shadow mode only. Its forecasts may be recorded and scored, never used to open, size or close trades without the strategy-change protocol and human approval.
+9. **No LLM or AI calls in the trading path.** The daily dip module reads Dukascopy price history for its signals. That is deterministic data, not AI. A data failure skips the day; it never guesses. Decisions are deterministic code. Kronos (`bot/kronos_shadow.py`) runs in shadow mode only. Its forecasts may be recorded and scored, never used to open, size or close trades without the strategy-change protocol and human approval.
 10. **No lookahead.**
     - Act only on closed bars.
     - An indicator value at bar t may use data ≤ t only.
