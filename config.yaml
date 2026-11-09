@@ -40,7 +40,7 @@ markets:
   - name: GBPUSD
     epic: CS.D.GBPUSD.TODAY.IP
     group: fx_usd
-    modules: [trend, meanrev, sweep]
+    modules: [trend, meanrev, sweep, dip]
     allow_short: true
     point_value: 1.0
     price_scale: 10000
@@ -51,6 +51,11 @@ markets:
     backtest_spread_points: 1.4
     funding_long_pct: 3.0
     funding_short_pct: 3.0
+    dip:                        # passed the screen, but thinly (PF 1.67, ~1%/yr unlevered)
+      source: GBPUSD
+      price_range: [1.0, 1.8]
+      schedule: fx_day          # close 17:00 New York, fill 08:00 London next weekday
+      long_only: false
 
   - name: UK100
     epic: IX.D.FTSE.DAILY.IP
@@ -105,7 +110,7 @@ markets:
   - name: GOLD
     epic: CS.D.USCGC.TODAY.IP
     group: metals
-    modules: [trend, sweep]
+    modules: [trend, sweep, dip]
     allow_short: true
     point_value: 1.0
     price_scale: 1.0
@@ -116,6 +121,11 @@ markets:
     backtest_spread_points: 0.6
     funding_long_pct: 5.0
     funding_short_pct: 3.0
+    dip:                        # passed the screen thinly (PF 1.51); IG's £1/pt minimum is usually too big for the dip pot
+      source: XAUUSD
+      price_range: [1000, 6000]
+      schedule: fx_day
+      long_only: false
 
   - name: SILVER
     epic: CS.D.USCSI.TODAY.IP     # Spot Silver DFB (found via IG market search, 2026-11-08)
@@ -167,6 +177,48 @@ markets:
       schedule: us_index
       long_only: true
       search: US Tech 100
+
+  - name: NZDUSD                # dip module only; passed the screen thinly (PF 1.54)
+    epic: CS.D.NZDUSD.TODAY.IP  # verified at startup (DIP_MARKET_OK / UNAVAILABLE + IG search)
+    group: fx_usd
+    modules: [dip]
+    allow_short: true
+    point_value: 1.0
+    price_scale: 10000
+    min_size: 0.04
+    size_step: 0.01
+    margin_pct: 5.0
+    max_spread_points: 4.0
+    backtest_spread_points: 1.6
+    funding_long_pct: 3.0
+    funding_short_pct: 3.0
+    dip:
+      source: NZDUSD
+      price_range: [0.5, 0.8]
+      schedule: fx_day
+      long_only: false
+      search: NZD/USD
+
+  - name: EURJPY                # dip module only; passed the screen (PF 1.86, positive every year 2019-26)
+    epic: CS.D.EURJPY.TODAY.IP  # verified at startup (DIP_MARKET_OK / UNAVAILABLE + IG search)
+    group: fx_cross
+    modules: [dip]
+    allow_short: true
+    point_value: 1.0
+    price_scale: 100
+    min_size: 0.04
+    size_step: 0.01
+    margin_pct: 3.33
+    max_spread_points: 4.0
+    backtest_spread_points: 1.5
+    funding_long_pct: 3.0
+    funding_short_pct: 3.0
+    dip:
+      source: EURJPY
+      price_range: [100, 200]
+      schedule: fx_day
+      long_only: false
+      search: EUR/JPY
 
 # Palladium: IG has no undated spot market, only dated futures (expiring contracts).
 # Not added until the bot handles contract rollover.
