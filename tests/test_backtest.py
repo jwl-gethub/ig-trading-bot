@@ -18,6 +18,8 @@ def test_runs_and_reports(cfg):
 
 def test_small_account_skips_unsizeable(cfg):
     cfg["markets"] = [m for m in cfg["markets"] if m["name"] in ("EURUSD", "GBPUSD", "UK100", "US500", "GER40", "GOLD")]
+    for m in cfg["markets"]:
+        m["min_size"] = 0.5                    # guardrail 6 test: a minimum stake too big for a £300 account
     data = synthetic_universe(cfg["markets"], 1200, regimes=True)
     res = Backtester(cfg, data, 300).run()
     assert res.rejections.get("UNSIZEABLE", 0) > 0
@@ -25,6 +27,9 @@ def test_small_account_skips_unsizeable(cfg):
 
 
 def test_costs_reduce_pnl(cfg):
+    cfg["safety"]["max_spread_pct_of_stop"] = None     # same trades in both runs: compare costs only
+    for m in cfg["markets"]:
+        m["max_spread_points"] = None
     data = synthetic_universe(cfg["markets"], 1500, regimes=True)
     with_cost = Backtester(cfg, data, 50_000).run()
     free = copy.deepcopy(cfg)

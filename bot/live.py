@@ -42,6 +42,7 @@ from .feasibility import feasibility_row
 from .indicators import compute_all, true_range
 from .risk import RiskManager, RiskState
 from .sleeves import Sleeves, sleeve_key
+from .history import HistoryDownloader
 from .kronos_shadow import KronosShadow
 from .learning import append_journal, journal_record, load_journal, review
 from .learning import settings as learning_settings
@@ -169,6 +170,7 @@ class LiveRunner:
         self.risk = RiskManager(cfg["risk"], cfg["safety"])
         self.sleeves = Sleeves(cfg)
         self.kronos = KronosShadow(cfg, self.log_dir, self.state_dir)
+        self.history = HistoryDownloader(cfg, broker, self.state_dir, self.log_dir, self.event)
         self._info_cache: dict[str, tuple] = {}
         self._load_state()
 
@@ -511,6 +513,20 @@ class LiveRunner:
         self.kronos_selftest()
         self.save_state()
 
+    # ---------------- idle-time work: history download + backtest (no trading effect)
+    def _background(self, now: pd.Timestamp) -> None:
+        if self.history.disabled:
+            return
+        if any(t <= now + pd.Timedelta(minutes=10) for t in self.next_check.values()):
+            return                                   # a bar is due soon: stay out of the way
+        try:
+            if not self.history.step(now):
+                self.history.maybe_backtest()
+        except Exception as exc:                     # fail closed for this feature only
+            self.history.disabled = True
+            self.event("HISTORY_ERROR", error=repr(exc),
+                       note="history download/backtest stopped until restart; trading unaffected")
+
     # ---------------- Kronos (shadow only: recorded and scored, never traded on)
     def kronos_selftest(self) -> None:
         if not self.kronos.enabled:
@@ -615,6 +631,7 @@ class LiveRunner:
         self.maybe_learn(now)
         updated = self.refresh(now)
         if not updated:
+            self._background(now)
             return True
         self._info_cache = {}
         equity = self.broker.equity()

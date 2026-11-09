@@ -95,6 +95,8 @@ class IGClient:
         self.timeout = timeout
         self.session = requests.Session()
         self._tokens: dict[str, str] = {}
+        self.allowance_remaining: int | None = None   # IG weekly historical-data allowance, from last /prices
+        self.allowance_expiry_s: int | None = None
         self._non_trading = _Bucket(25)   # headroom under the 30/min account limit
         self._trading = _Bucket(60)
 
@@ -209,6 +211,22 @@ class IGClient:
         """Last n bars (mid prices). The newest bar may still be forming — caller drops it."""
         d = self._request("GET", f"/prices/{epic}", 3,
                           params={"resolution": resolution, "max": n, "pageSize": 0}).json()
+        return self._parse_prices(d)
+
+    def bars_range(self, epic: str, resolution: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+        """Bars between two times (history download). Costs one allowance point per bar."""
+        fmt = "%Y-%m-%dT%H:%M:%S"
+        d = self._request("GET", f"/prices/{epic}", 3,
+                          params={"resolution": resolution, "from": start.strftime(fmt),
+                                  "to": end.strftime(fmt), "pageSize": 0}).json()
+        return self._parse_prices(d)
+
+    def _parse_prices(self, d: dict) -> pd.DataFrame:
+        allowance = d.get("metadata", {}).get("allowance", {})
+        if allowance:
+            self.allowance_remaining = allowance.get("remainingAllowance")
+            self.allowance_expiry_s = allowance.get("allowanceExpiry")
+            log.info("historical allowance remaining=%s", self.allowance_remaining)
         rows = []
         for p in d.get("prices", []):
             def mid(k):
@@ -225,9 +243,6 @@ class IGClient:
         df = pd.DataFrame(rows)
         if df.empty:
             return df
-        allowance = d.get("metadata", {}).get("allowance", {})
-        if allowance:
-            log.info("historical allowance remaining=%s", allowance.get("remainingAllowance"))
         return df.set_index("timestamp").sort_index().dropna()
 
     def open_positions(self) -> list[dict]:

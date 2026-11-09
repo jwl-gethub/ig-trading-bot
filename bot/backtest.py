@@ -217,6 +217,14 @@ class Backtester:
                     n_signals += 1
                     exposures = list(positions.values()) + [p for _, p in pending_entry.values()]
                     s_eq = sleeve_eq[sn]
+                    spread = float(mkt["backtest_spread_points"])           # same spread rules as live
+                    if mkt.get("max_spread_points") is not None and spread > mkt["max_spread_points"]:
+                        rejections["SPREAD_WIDE"] += 1
+                        continue
+                    pct_cap = self.cfg["safety"].get("max_spread_pct_of_stop")
+                    if pct_cap and spread > sig.stop_distance * pct_cap / 100:
+                        rejections["SPREAD_TOO_COSTLY"] += 1
+                        continue
                     lev_room = sleeves.max_size_by_leverage(sn, s_eq, exposures, row["close"], mkt["point_value"])
                     sz = self.risk.size(s_eq, sig.stop_distance, mkt["point_value"], mkt["min_size"],
                                         mkt["size_step"], risk_pct=sleeves.risk_pct(sn), max_size=lev_room,

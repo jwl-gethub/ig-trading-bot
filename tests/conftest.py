@@ -17,6 +17,7 @@ from bot.ig_client import MarketInfo  # noqa: E402
 def cfg():
     c = copy.deepcopy(load_config(ROOT / "config.yaml"))
     c["kronos"]["enabled"] = False          # tests that need Kronos switch it on with a fake worker
+    c["history"]["enabled"] = False         # tests that need the history downloader switch it on
     return c
 
 
@@ -60,6 +61,16 @@ class FakeBroker:
 
     def bars(self, epic, resolution, n):
         return self._visible(epic).tail(n)
+
+    allowance_remaining = 9000
+    range_calls: list = []
+
+    def bars_range(self, epic, resolution, start, end):
+        df = self._visible(epic)
+        out = df[(df.index >= start) & (df.index <= end)]
+        self.range_calls = self.range_calls + [(epic, start, end)]
+        self.allowance_remaining -= len(out)
+        return out
 
     def market_info(self, epic):
         px = float(self._visible(epic)["close"].iloc[-1])
