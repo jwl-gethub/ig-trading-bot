@@ -148,7 +148,7 @@ markets:
     funding_short_pct: 3.0
 
   - name: USTECH                # dip module only (no 4H bars, no IG history allowance)
-    epic: IX.D.NASDAQ.DAILY.IP  # US Tech 100 DFB; verified at startup (DIP_MARKET_OK / UNAVAILABLE)
+    epic: IX.D.NASDAQ.CASH.IP   # US Tech 100 DFB (IG market search via DIP_MARKET_UNAVAILABLE, 2026-11-09)
     group: equity_index
     modules: [dip]
     allow_short: false
