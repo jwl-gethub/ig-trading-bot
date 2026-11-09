@@ -303,3 +303,39 @@ def test_spread_rule_relative_to_stop(cfg, make_broker, tmp_path):
     assert broker.orders == []
     events = [json.loads(x) for x in (tmp_path / "logs" / "decisions.jsonl").read_text().splitlines()]
     assert any(str(e.get("reason", "")).startswith("SPREAD_TOO_COSTLY") for e in events)
+
+
+# ---------------------------------------------------------------- IG historical allowance
+def test_restart_mid_bar_waits_for_bar_close_instead_of_polling(cfg, make_broker, tmp_path):
+    cfg = _cfg3(cfg)
+    broker = make_broker(cfg, n_bars=600, equity=10_000)
+    r, start = _runner(cfg, broker, tmp_path, dry_run=True)
+    calls = []
+    orig = broker.bars
+    broker.bars = lambda epic, res, n: calls.append(epic) or orig(epic, res, n)
+    t = start + pd.Timedelta(hours=1)            # restarted mid-bar; latest closed bar already handled
+    broker.now = t
+    r.last_bar = {n: str(df.index[-1]) for n, df in r.bars.items()}
+    r.next_check = {n: t for n in r.mkts}
+    assert r.refresh(t) == [] and len(calls) == len(r.mkts)
+    for k in range(1, 12):                       # every 15 min until 3h45m in (bar closes at 3h59m)
+        t = start + pd.Timedelta(hours=1) + k * pd.Timedelta(minutes=15)
+        broker.now = t
+        assert r.refresh(t) == []
+    assert len(calls) == len(r.mkts)             # no fetches while the bar is still forming
+    t = start + pd.Timedelta(hours=4)            # next bar has closed
+    broker.now = t
+    assert sorted(r.refresh(t)) == sorted(r.mkts) and len(calls) == 2 * len(r.mkts)
+
+
+def test_late_bar_retries_briefly_then_closed_market_checks_once_per_bar(cfg, make_broker, tmp_path):
+    cfg = _cfg3(cfg)
+    broker = make_broker(cfg, n_bars=600, equity=10_000)
+    r, _ = _runner(cfg, broker, tmp_path, dry_run=True)
+    df = r.bars["EURUSD"]
+    last = df.index[-1]
+    h = pd.Timedelta(hours=1)
+    assert r._next_check_without_new_bar(df, last + 5 * h) == last + 8 * h + pd.Timedelta(seconds=30)
+    late = last + 8 * h + pd.Timedelta(minutes=10)
+    assert r._next_check_without_new_bar(df, late) == late + pd.Timedelta(minutes=15)
+    assert r._next_check_without_new_bar(df, last + 30 * h) == last + 32 * h + pd.Timedelta(seconds=30)

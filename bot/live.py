@@ -301,11 +301,21 @@ class LiveRunner:
                 df.to_csv(self._cache_path(name))
                 self.next_check[name] = df.index[-1] + 2 * self.bar_delta + pd.Timedelta(seconds=30)
             else:
-                # bar late -> retry soon; market closed (weekend/holiday) -> back off to save allowance
-                last_close = (df.index[-1] + self.bar_delta) if len(df) else now
-                closed = (now - last_close) > 2 * self.bar_delta
-                self.next_check[name] = now + pd.Timedelta(minutes=60 if closed else 15)
+                self.next_check[name] = self._next_check_without_new_bar(df, now)
         return updated
+
+    def _next_check_without_new_bar(self, df: pd.DataFrame, now: pd.Timestamp) -> pd.Timestamp:
+        """No new closed bar. Wait for the next bar close (e.g. after a restart mid-bar). Retry every
+        15 min for up to an hour only if a bar is overdue (IG lag). If it's still missing (weekend,
+        holiday), check once per bar. Keeps history use to about 1 fetch per market per bar."""
+        if not len(df):
+            return now + pd.Timedelta(minutes=15)
+        due = df.index[-1] + 2 * self.bar_delta + pd.Timedelta(seconds=30)   # close of the next bar
+        if now < due:
+            return due
+        if now - due < pd.Timedelta(hours=1):
+            return now + pd.Timedelta(minutes=15)
+        return due + (int((now - due) / self.bar_delta) + 1) * self.bar_delta
 
     # ---------------- reconciliation
     def reconcile(self, now) -> None:
