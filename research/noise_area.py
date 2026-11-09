@@ -222,3 +222,29 @@ def buy_and_hold(sm: dict, start=None, end=None) -> float | None:
     if len(idx) < 2:
         return None
     return round(100 * float(sm["close"][idx[-1], -1] / sm["close"][idx[0], 0] - 1), 1)
+
+
+def last_half_hour(sm: dict, p: Params, signal: str = "rest_of_day", minutes: int = 30) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Market intraday momentum (Gao et al. 2018; Baltussen et al. 2021): trade the final half hour
+    in the direction of the day so far. signal='rest_of_day': previous close -> 30 min before the
+    close; 'first_half_hour': previous close -> 30 min after the open. Flat at the close."""
+    ind = indicators(sm, p)
+    o, c = sm["open"], sm["close"]
+    D, M = c.shape
+    t_in = M - minutes
+    trades, daily = [], []
+    for i in range(D):
+        lev, pc = ind["lev"][i], ind["prev_close"][i]
+        if not (np.isfinite(lev) and np.isfinite(pc)):
+            continue
+        ref_px = c[i, t_in - 1] if signal == "rest_of_day" else c[i, 29]
+        go = int(np.sign(ref_px / pc - 1))
+        r = 0.0
+        if go:
+            entry = o[i, t_in] + go * p.cost_side_points
+            exit_ = c[i, M - 1] - go * p.cost_side_points
+            r = go * (exit_ - entry) / entry
+            trades.append({"day": sm["days"][i], "dir": go, "t_in": t_in, "t_out": M - 1, "entry": entry,
+                           "exit": exit_, "ret": r, "acct_ret": lev * r, "lev": lev, "reason": "close"})
+        daily.append({"day": sm["days"][i], "ret": lev * r, "lev": lev})
+    return pd.DataFrame(trades), pd.DataFrame(daily)

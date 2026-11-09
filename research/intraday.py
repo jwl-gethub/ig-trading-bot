@@ -15,7 +15,7 @@ from datetime import date
 from pathlib import Path
 
 from .dukascopy import load_range
-from .noise_area import Params, backtest, buy_and_hold, metrics, session_matrix
+from .noise_area import Params, backtest, buy_and_hold, last_half_hour, metrics, session_matrix
 
 MARKETS = {   # IG in-hours spread / 2 + slippage per fill, in index points
     "US500": {"inst": "USA500IDXUSD", "range": (1500, 12000), "cost_side": 0.2 + 0.1},
@@ -56,8 +56,16 @@ def run(markets: list[str], cache: Path) -> None:
         vs = variants(spec["cost_side"])
         if name != "US500":
             vs = {k: vs[k] for k in ("paper_rules", "live_twap_stop")}
-        for vname, p in vs.items():
-            trades, daily = backtest(sm, p)
+        runs = {k: (lambda p=p: backtest(sm, p)) for k, p in vs.items()}
+        base = Params(cost_side_points=spec["cost_side"])
+        runs["last30_rest_of_day"] = lambda: last_half_hour(sm, base, "rest_of_day")
+        runs["last30_first_half_hour"] = lambda: last_half_hour(sm, base, "first_half_hour")
+        runs["last30_rest_of_day_unlevered"] = lambda: last_half_hour(sm, replace(base, vol_target=False))
+        if os.environ.get("RESEARCH_ONLY"):
+            runs = {k: v for k, v in runs.items() if k.startswith(os.environ["RESEARCH_ONLY"])}
+        for vname, fn in runs.items():
+            trades, daily = fn()
+            p = vs.get(vname, base)
             for per, (a, b) in PERIODS.items():
                 m = metrics(trades, daily, a, b)
                 log({"event": "RESULT", "market": name, "variant": vname, "period": per,

@@ -97,3 +97,17 @@ def test_dukascopy_parser_finds_columns_and_scale():
     assert df.iloc[0].open == 5000.123 and df.iloc[0].close == 5000.456
     assert df.iloc[0].low == 4999.9 and df.iloc[0].high == 5000.9
     assert str(df.index[1]) == "2025-01-06 00:01:00+00:00"
+
+
+def test_last_half_hour_follows_the_day_and_ignores_the_future():
+    from research.noise_area import last_half_hour
+    calm = _random_walk(20, seed=9, vol=0.0002)
+    up_day = calm[-1, -1] * np.exp(np.linspace(0, 0.01, M))
+    paths = np.vstack([calm, up_day])
+    trades, daily = last_half_hour(_sm(paths), Params(cost_side_points=0.0))
+    last = trades[trades.day == trades.day.max()].iloc[0]
+    assert last.dir == 1 and last.t_in == M - 30 and last.ret > 0
+    changed = paths.copy()
+    changed[-1, M - 30:] = changed[-1, M - 31]                       # flatten the final half hour
+    t2, _ = last_half_hour(_sm(changed), Params(cost_side_points=0.0))
+    assert t2[t2.day == t2.day.max()].iloc[0].dir == 1                # same signal: no lookahead
