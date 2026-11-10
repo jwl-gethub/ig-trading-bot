@@ -131,6 +131,12 @@ def main() -> None:
     markets = [m for m in os.environ.get("RESEARCH_MARKETS", ",".join(MARKETS)).split(",") if m]
     log({"event": "START", "markets": markets, "cache": str(cache)})
     try:
+        if os.environ.get("RESEARCH_JOB") == "scalp":
+            from .scalp_test import run as run_scalp
+            run_scalp(cache)
+            log({"event": "DONE"})
+            while True:                       # stay up so the service does not restart and re-run
+                time.sleep(3600)
         if os.environ.get("RESEARCH_DIP_SCREEN", "1") == "1":
             from .dip_markets import screen
             screen(str(cache.parent / "hourly"))
