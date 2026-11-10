@@ -43,8 +43,9 @@ from .feasibility import feasibility_row
 from .indicators import compute_all, true_range
 from .risk import RiskManager, RiskState
 from .sleeves import Sleeves, sleeve_key
-from .dip_live import DipEngine, is_dip
+from .dip_live import DipEngine
 from .history import HistoryDownloader
+from .scalp_live import ScalpEngine
 from .kronos_shadow import KronosShadow
 from .learning import append_journal, journal_record, load_journal, review
 from .learning import settings as learning_settings
@@ -182,6 +183,8 @@ class LiveRunner:
         self.dip_done: dict[str, str] = {}
         self._load_state()
         self.dip = DipEngine(self)
+        self.exit_hints: dict[str, tuple[float, float]] = {}
+        self.scalp = ScalpEngine(self)
 
     # ---------------- persistence & logging
     @property
@@ -357,6 +360,17 @@ class LiveRunner:
 
     def _estimate_server_exit(self, pos: PositionState) -> tuple[float, str]:
         """IG closed it (stop or limit hit). Use the latest bar to judge which one."""
+        hint = self.exit_hints.pop(sleeve_key(pos.sleeve, pos.market), None)
+        if hint and pos.target_level is not None:        # price range seen since entry (scalper)
+            reached = hint[0] >= pos.target_level if pos.direction == 1 else hint[1] <= pos.target_level
+            hit_stop = hint[1] <= pos.stop_level if pos.direction == 1 else hint[0] >= pos.stop_level
+            if reached and not hit_stop:
+                return pos.target_level, "target_server_side"
+            if hit_stop and not reached:
+                return pos.stop_level, "stop_server_side"
+            near_t = abs((hint[0] if pos.direction == 1 else hint[1]) - pos.target_level)
+            near_s = abs((hint[1] if pos.direction == 1 else hint[0]) - pos.stop_level)
+            return (pos.target_level, "target_server_side") if near_t < near_s else (pos.stop_level, "stop_server_side")
         df = self.bars.get(pos.market)
         if pos.target_level is not None and df is not None and len(df):
             bar = df.iloc[-1]
@@ -529,6 +543,7 @@ class LiveRunner:
         self.warm_up(now)
         self.reconcile(now)
         self.event("SLEEVES", **self.sleeve_summary())
+        self.scalp.startup(now)
         if self.dip.enabled:
             self.dip.check_markets()
             threading.Thread(target=self.dip.prefetch, args=(now,), daemon=True, name="dip-prefetch").start()
@@ -657,6 +672,10 @@ class LiveRunner:
             self.dip.tick(now)
         except Exception as exc:          # the daily strategy must never take down the 4H bot
             self.event("DIP_ERROR", error=repr(exc))
+        try:
+            self.scalp.tick(now)
+        except Exception as exc:          # nor may the scalper
+            self.event("SCALP_ERROR", error=repr(exc))
         updated = self.refresh(now)
         if not updated:
             self._background(now)
@@ -681,7 +700,7 @@ class LiveRunner:
                 self.event("NOT_ENOUGH_BARS", market=name, bars=len(df))
                 continue
             row = compute_all(df, self.cfg["strategy"]).iloc[-1].to_dict()
-            for key in [k for k, p in self.positions.items() if p.market == name and not is_dip(p)]:
+            for key in [k for k, p in self.positions.items() if p.market == name and p.module in BAR_MODULES]:
                 self._manage(key, row, now)
             for sn in self.sleeves.names():
                 if sleeve_key(sn, name) not in self.positions:

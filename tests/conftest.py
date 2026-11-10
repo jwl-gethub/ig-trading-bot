@@ -18,6 +18,7 @@ def cfg():
     c = copy.deepcopy(load_config(ROOT / "config.yaml"))
     c["kronos"]["enabled"] = False          # tests that need Kronos switch it on with a fake worker
     c["history"]["enabled"] = False         # tests that need the history downloader switch it on
+    c["scalp"]["enabled"] = False           # test_scalp_live switches it on
     c["dip"]["enabled"] = False             # no network in tests; test_dip_live switches it on with a fake source
     return c
 

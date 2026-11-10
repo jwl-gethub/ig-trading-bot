@@ -59,9 +59,13 @@ def validate(cfg: dict) -> dict:
         if m["name"] in names:
             raise ConfigError(f"duplicate market {m['name']}")
         names.add(m["name"])
-        bad = set(m["modules"]) - {"trend", "meanrev", "sweep", "dip"}
+        bad = set(m["modules"]) - {"trend", "meanrev", "sweep", "dip", "scalp"}
         if bad:
             raise ConfigError(f"market {m['name']} unknown modules {bad}")
+        if "scalp" in m["modules"]:
+            h = (m.get("scalp") or {}).get("hours_utc")
+            if not h or len(h) != 2 or not 0 <= h[0] < h[1] <= 24:
+                raise ConfigError(f"market {m['name']}: scalp needs hours_utc [start, end]")
         if "dip" in m["modules"]:
             from .dip_live import SCHEDULES
             d = m.get("dip") or {}

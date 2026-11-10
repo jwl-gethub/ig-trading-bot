@@ -184,8 +184,11 @@ class Sleeves:
         else:
             st.gross_loss += -pnl
             st.loss_streak += 1
-            if st.loss_streak % self.r["loss_streak_pause"] == 0:
-                st.pause_until = (_ts(ts) + pd.Timedelta(hours=self.r["pause_hours"])).isoformat()
+            spec = self.spec[name]                      # a sleeve may set its own cool-off (never none)
+            every = int(spec.get("loss_streak_pause", self.r["loss_streak_pause"]))
+            hours = float(spec.get("pause_hours", self.r["pause_hours"]))
+            if st.loss_streak % every == 0:
+                st.pause_until = (_ts(ts) + pd.Timedelta(hours=hours)).isoformat()
 
     def summary(self, positions: Iterable, prices: dict[str, float]) -> dict:
         positions = list(positions)
@@ -225,6 +228,8 @@ def validate_sleeves(cfg: dict) -> None:
         acct_risk = float(s["weight"]) * float(s["risk_per_trade_pct"])
         if acct_risk > cap + 1e-9:
             raise ConfigError(f"sleeve {name}: one trade risks {acct_risk:.2f}% of the account > {cap}% ceiling")
+        if not 2 <= int(s.get("loss_streak_pause", 6)) <= 10 or float(s.get("pause_hours", 48)) < 1:
+            raise ConfigError(f"sleeve {name}: loss_streak_pause must be 2-10 and pause_hours >= 1")
         tol = s.get("min_size_max_risk_pct")
         if tol is not None:
             tol = float(tol)

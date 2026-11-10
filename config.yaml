@@ -25,7 +25,7 @@ markets:
   - name: EURUSD
     epic: CS.D.EURUSD.TODAY.IP
     group: fx_usd
-    modules: [trend, meanrev, sweep]
+    modules: [trend, meanrev, sweep, scalp]
     allow_short: true
     point_value: 1.0            # GBP per point per 1.0 stake
     price_scale: 10000          # CSV history 1.0850 -> IG quote 10850
@@ -36,11 +36,13 @@ markets:
     backtest_spread_points: 0.9
     funding_long_pct: 3.0       # annualised, conservative approximation
     funding_short_pct: 3.0
+    scalp:
+      hours_utc: [7, 17]       # liquid session only (entries)
 
   - name: GBPUSD
     epic: CS.D.GBPUSD.TODAY.IP
     group: fx_usd
-    modules: [trend, meanrev, sweep, dip]
+    modules: [trend, meanrev, sweep, dip, scalp]
     allow_short: true
     point_value: 1.0
     price_scale: 10000
@@ -56,6 +58,8 @@ markets:
       price_range: [1.0, 1.8]
       schedule: fx_day          # close 17:00 New York, fill 08:00 London next weekday
       long_only: false
+    scalp:
+      hours_utc: [7, 17]       # liquid session only (entries)
 
   - name: UK100
     epic: IX.D.FTSE.DAILY.IP
@@ -75,7 +79,7 @@ markets:
   - name: US500
     epic: IX.D.SPTRD.DAILY.IP
     group: equity_index
-    modules: [trend, meanrev, sweep, dip]
+    modules: [trend, meanrev, sweep, dip, scalp]
     allow_short: false
     point_value: 1.0
     price_scale: 1.0
@@ -91,11 +95,13 @@ markets:
       price_range: [1500, 12000]
       schedule: us_index        # close 16:00 New York, fill 10:00 New York next weekday
       long_only: true
+    scalp:
+      hours_utc: [14, 21]       # liquid session only (entries)
 
   - name: GER40
     epic: IX.D.DAX.DAILY.IP
     group: equity_index
-    modules: [trend, meanrev, sweep]
+    modules: [trend, meanrev, sweep, scalp]
     allow_short: false
     point_value: 1.0
     price_scale: 1.0
@@ -106,11 +112,13 @@ markets:
     backtest_spread_points: 2.0
     funding_long_pct: 6.0
     funding_short_pct: 2.5
+    scalp:
+      hours_utc: [8, 16]       # liquid session only (entries)
 
   - name: GOLD
     epic: CS.D.USCGC.TODAY.IP
     group: metals
-    modules: [trend, sweep, dip]
+    modules: [trend, sweep, dip, scalp]
     allow_short: true
     point_value: 1.0
     price_scale: 1.0
@@ -126,6 +134,8 @@ markets:
       price_range: [1000, 6000]
       schedule: fx_day
       long_only: false
+    scalp:
+      hours_utc: [7, 20]       # liquid session only (entries)
 
   - name: SILVER
     epic: CS.D.USCSI.TODAY.IP     # Spot Silver DFB (found via IG market search, 2026-11-08)
@@ -160,7 +170,7 @@ markets:
   - name: USTECH                # dip module only (no 4H bars, no IG history allowance)
     epic: IX.D.NASDAQ.CASH.IP   # US Tech 100 DFB (IG market search via DIP_MARKET_UNAVAILABLE, 2026-11-09)
     group: equity_index
-    modules: [dip]
+    modules: [dip, scalp]
     allow_short: false
     point_value: 1.0
     price_scale: 1.0
@@ -177,6 +187,8 @@ markets:
       schedule: us_index
       long_only: true
       search: US Tech 100
+    scalp:
+      hours_utc: [14, 21]       # liquid session only (entries)
 
   - name: NZDUSD                # dip module only; passed the screen thinly (PF 1.54)
     epic: CS.D.NZDUSD.TODAY.IP  # verified at startup (DIP_MARKET_OK / UNAVAILABLE + IG search)
@@ -311,7 +323,7 @@ sleeves:
     max_drawdown_pct: 50      # stops opening trades after losing half the sleeve
   trend:
     modules: [trend]
-    weight: 0.30              # £3,000 (was 0.45; re-cut 2026-11-09 for the dip sleeve)
+    weight: 0.25              # £2,500 (re-cut 2026-11-10 for the scalp sleeve)
     risk_per_trade_pct: 1.0
     min_size_max_risk_pct: 2.0  # approved by Wissam 2026-11-09: if IG's minimum stake (e.g. gold £1/pt)
                                 # risks more than 1%, take the minimum only if it risks <= 2% (~£90)
@@ -321,7 +333,7 @@ sleeves:
     max_drawdown_pct: 20
   meanrev:
     modules: [meanrev]
-    weight: 0.20              # £2,000 (was 0.45; re-cut 2026-11-09 for the dip sleeve)
+    weight: 0.15              # £1,500 (re-cut 2026-11-10)
     risk_per_trade_pct: 1.0
     max_leverage: 3
     max_open_positions: 2
@@ -329,12 +341,22 @@ sleeves:
     max_drawdown_pct: 20
   dip:                        # daily RSI(2) dip, quick exit (STRATEGY.md 6c); added 2026-11-09 at Wissam's request
     modules: [dip]
-    weight: 0.40              # £4,000
+    weight: 0.20              # £2,000 (re-cut 2026-11-10)
     risk_per_trade_pct: 1.0   # £40 per trade at the 2.5x ATR stop
     max_leverage: 3
     max_open_positions: 3
     max_positions_per_group: 2
     max_drawdown_pct: 20
+  scalp:                      # 15-minute pullback scalper; requested by Wissam 2026-11-10 ("aggressive", demo)
+    modules: [scalp]
+    weight: 0.30              # £3,000
+    risk_per_trade_pct: 1.0   # £30 at the 1x ATR stop; take-profit 1.5x ATR
+    max_leverage: 10          # tight stops need exposure; still capped by the account's 5x total
+    max_open_positions: 3
+    max_positions_per_group: 2
+    max_drawdown_pct: 25
+    loss_streak_pause: 5      # cool off after 5 losses in a row...
+    pause_hours: 4            # ...for 4 hours (other sleeves keep the 48h default)
 
 # ---------------------------------------------------------------------
 # Safety — do not loosen.
@@ -347,7 +369,7 @@ safety:
   pause_file: PAUSE               # touch PAUSE -> no new entries
   friday_cutoff_utc: "16:00"      # no new entries after this on Fridays
   max_spread_pct_of_stop: 10      # skip an entry if the live spread costs > 10% of the stop distance
-  max_orders_per_day: 8
+  max_orders_per_day: 30          # was 8; raised 2026-11-10 at Wissam's request for the 15-minute scalper (demo)
   poll_seconds: 60
 
 # ---------------------------------------------------------------------
@@ -387,6 +409,16 @@ dip:
   retry_minutes: 15           # if the previous close is not published yet
   grace_hours: 3              # then skip the day (DIP_MISSED)
   rules: {rsi_long: 5, rsi_short: 95, trend_sma: 200, exit_sma: 5, stop_atr: 2.5}
+
+# ---------------------------------------------------------------------
+# 15-minute scalper (bot/scalp_live.py). Bars built from IG's live quotes, polled each minute.
+# ---------------------------------------------------------------------
+scalp:
+  enabled: true
+  sleeve: scalp
+  seed_bars: 260              # one-off IG history per market (15-minute bars), kept on disk
+  allowance_reserve: 1000     # never take IG's weekly history allowance below this
+  rules: {ema_fast: 20, ema_slow: 50, ema_trend: 200, rsi_long: 10, rsi_short: 90, stop_atr: 1.0, target_atr: 1.5, max_bars: 8}
 
 # ---------------------------------------------------------------------
 # Real price history (bot/history.py): downloaded by the live bot when idle,

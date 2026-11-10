@@ -17,22 +17,23 @@ def pos(sleeve, market="EURUSD", group="fx_usd", notional=0.0, entry=1000.0, siz
                          group=group, sleeve=sleeve, notional=notional)
 
 
-def test_config_sleeves_are_10_30_20_40(cfg):
+def test_config_sleeves_split_the_account(cfg):
     s = Sleeves(cfg)
     s.ensure_bases(10_000)
-    assert {n: st.base for n, st in s.states.items()} == {"leveraged": 1000, "trend": 3000, "meanrev": 2000,
-                                                          "dip": 4000}
-    assert s.by_module == {"sweep": "leveraged", "trend": "trend", "meanrev": "meanrev", "dip": "dip"}
+    assert {n: st.base for n, st in s.states.items()} == {"leveraged": 1000, "trend": 2500, "meanrev": 1500,
+                                                          "dip": 2000, "scalp": 3000}
+    assert s.by_module == {"sweep": "leveraged", "trend": "trend", "meanrev": "meanrev", "dip": "dip",
+                           "scalp": "scalp"}
 
 
 @pytest.mark.parametrize("mutate", [
     lambda c: c["sleeves"]["trend"].update(weight=0.9),                 # weights > 1
     lambda c: c["sleeves"]["trend"]["modules"].append("sweep"),         # module in two sleeves
     lambda c: c["sleeves"]["leveraged"].update(risk_per_trade_pct=25),  # above sleeve hard limit
-    lambda c: c["sleeves"]["trend"].update(risk_per_trade_pct=7),       # 0.30 x 7% = 2.1% of account > 2%
+    lambda c: c["sleeves"]["trend"].update(risk_per_trade_pct=9),       # 0.25 x 9% = 2.25% of account > 2%
     lambda c: c["sleeves"]["leveraged"].update(max_leverage=50),        # above IG max
     lambda c: c["sleeves"]["trend"].update(min_size_max_risk_pct=0.5),  # below the sleeve's own risk
-    lambda c: c["sleeves"]["trend"].update(min_size_max_risk_pct=7),    # 0.30 x 7% = 2.1% of account > 2%
+    lambda c: c["sleeves"]["trend"].update(min_size_max_risk_pct=9),    # 0.25 x 9% = 2.25% of account > 2%
     lambda c: c["sleeves"]["leveraged"].update(min_size_max_risk_pct=12),  # above sleeve hard limit
 ])
 def test_sleeve_validation_rejects_risky_configs(cfg, mutate):

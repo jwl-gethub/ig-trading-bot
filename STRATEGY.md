@@ -128,6 +128,17 @@ The rules come from Connors & Alvarez, published around 2008. The research is in
   - IG's minimum stake is £1/pt for GOLD and NZDUSD. A dip trade there would risk about £90–160 against the £40 cap, so those signals are logged and skipped (UNSIZEABLE).
 - **Sleeve:** `dip`, 40% of the account, approved by the human on 2026-11-09. Trend went to 30% and mean reversion to 20%. The slices are re-cut from the same account reference, never added on top.
 
+## 6d. Module E: 15-minute pullback scalper (`bot/scalp.py`, `bot/scalp_live.py`)
+
+Added 2026-11-10 at the human's request, for the demo account.
+
+- **Trend:** close above EMA(200) with EMA(20) above EMA(50) for longs; the mirror image for shorts where the market allows shorts.
+- **Entry:** RSI(2) below 10 in an uptrend (above 90 in a downtrend), on a closed 15-minute bar, inside the market's liquid hours.
+- **Exits:** server-side stop 1 × ATR(14) and take-profit 1.5 × ATR(14); closed at market after 8 bars (2 hours).
+- **Data:** bars are built from IG's live quotes polled each minute; a one-off IG history seed is kept on disk.
+- **Guards:** the 10% spread-of-stop rule, sleeve and account limits, and a 4-hour cool-off after 5 losses in a row.
+- **Backtest (research/scalp_test.py, 2018–2026, four indices):** about 42% winners against a 40% break-even before costs. The edge before costs is about +0.01R a trade, so after spreads it loses (Nasdaq PF 0.91, the others worse). It is on demo as an experiment, not as a validated strategy.
+
 ## 7. Risk and position sizing (`bot/risk.py`)
 
 **Stake per point** = (equity × risk%) ÷ stop distance in points. It is rounded **down** to the size step. If IG's minimum stake would risk more than the cap, the trade is **skipped**, never rounded up.

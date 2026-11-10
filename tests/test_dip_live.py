@@ -21,8 +21,8 @@ def dip_cfg(cfg):
                dip={"source": "USATECHIDXUSD", "price_range": [100, 100000], "schedule": "us_index",
                     "long_only": True})
     c["markets"].append(nas)
-    c["sleeves"]["trend"]["weight"] = 0.30
-    c["sleeves"]["meanrev"]["weight"] = 0.20
+    c["sleeves"]["trend"]["weight"] = 0.10
+    c["sleeves"]["meanrev"]["weight"] = 0.10
     c["sleeves"]["dip"] = {"modules": ["dip"], "weight": 0.40, "risk_per_trade_pct": 1.0, "max_leverage": 3,
                            "max_open_positions": 3, "max_positions_per_group": 2, "max_drawdown_pct": 20}
     c["dip"] = {"enabled": True}
