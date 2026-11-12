@@ -104,6 +104,8 @@ def stat(t: pd.DataFrame) -> dict:
 def split(t: pd.DataFrame, periods: dict, name: str) -> pd.DataFrame:
     if name == "all":
         return t
+    if name not in periods:            # e.g. no development period for markets with short history
+        return t.iloc[0:0]
     a, b = periods[name]
     return t[(t.ts >= pd.Timestamp(a, tz="UTC")) & (t.ts <= pd.Timestamp(b + " 23:59:59", tz="UTC"))]
 

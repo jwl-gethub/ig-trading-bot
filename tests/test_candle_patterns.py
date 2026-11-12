@@ -157,3 +157,11 @@ def test_random_walk_no_edge():
         t = free.r.mean() / (free.r.std() / np.sqrt(len(free)))
         assert len(free) > 300 and abs(t) < 3.5, (len(free), t)
         assert paid.r.mean() < free.r.mean()
+
+
+def test_split_handles_market_without_development_period():
+    from research.candle_test import split
+    from research.structure_test import PERIODS_SHORT
+    t = pd.DataFrame({"ts": pd.to_datetime(["2024-03-01", "2025-03-01"], utc=True), "r": [1.0, -1.0]})
+    assert len(split(t, PERIODS_SHORT, "development")) == 0
+    assert len(split(t, PERIODS_SHORT, "validation")) == 1 and len(split(t, PERIODS_SHORT, "out_of_sample")) == 1
