@@ -137,6 +137,12 @@ def main() -> None:
             log({"event": "DONE"})
             while True:                       # stay up so the service does not restart and re-run
                 time.sleep(3600)
+        if os.environ.get("RESEARCH_JOB") == "structure":
+            from .structure_test import run as run_structure
+            run_structure(cache)
+            log({"event": "DONE"})
+            while True:
+                time.sleep(3600)
         if os.environ.get("RESEARCH_DIP_SCREEN", "1") == "1":
             from .dip_markets import screen
             screen(str(cache.parent / "hourly"))
