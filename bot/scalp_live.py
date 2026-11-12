@@ -20,6 +20,7 @@ from .strategy import Signal
 BAR = pd.Timedelta(minutes=15)
 DEFAULTS = {"enabled": True, "sleeve": "scalp", "seed_bars": 260, "allowance_reserve": 1000, "keep_bars": 600,
             "rules": {}}
+MIN_SAMPLES = 5
 RULE_KEYS = set(ScalpRules.__dataclass_fields__) - {"long_only"}
 
 
@@ -41,6 +42,7 @@ class ScalpEngine:
         self.forming: dict[str, dict] = {}
         self.decided: dict[str, pd.Timestamp] = {}
         self.off: set[str] = set()
+        self._status_hour: pd.Timestamp | None = None
 
     def rules(self, mkt: dict) -> ScalpRules:
         return ScalpRules(long_only=bool(mkt["scalp"].get("long_only", False)), **self.s["rules"])
@@ -71,17 +73,13 @@ class ScalpEngine:
                     fresh = self.r.broker.bars(mkt["epic"], "MINUTE_15", n)[["open", "high", "low", "close"]]
                     fresh = fresh[fresh.index + BAR <= now]
                     fetched = len(fresh)
-                    if gap >= need:
-                        df = fresh
-                    else:
-                        df = pd.concat([df, fresh])
-                        df = df[~df.index.duplicated(keep="last")].sort_index()
-                elif n > 2:
-                    df = df.iloc[0:0] if gap > 8 else df      # stale history is worse than none
+                    df = pd.concat([df, fresh])               # never drop stored bars because of a gap
+                    df = df[~df.index.duplicated(keep="last")].sort_index()
                 self.bars[name] = df.astype(float).tail(int(self.s["keep_bars"]))
                 self._save(name)
                 self.r.event("SCALP_READY", market=name, bars=int(len(df)), fetched=int(fetched),
-                             warm=bool(len(df) >= 210), allowance_left=getattr(self.r.broker, "allowance_remaining", None))
+                             warm=bool(len(df) >= 210),
+                             last_bar=df.index[-1].isoformat() if len(df) else None, allowance_left=getattr(self.r.broker, "allowance_remaining", None))
             except Exception as exc:
                 self.off.add(name)
                 self.r.event("SCALP_MARKET_OFF", market=name, error=repr(exc))
@@ -114,19 +112,18 @@ class ScalpEngine:
             f = self.forming.get(name)
             if f and f["start"] != start:               # the bar we were building has closed
                 df = self.bars.get(name, pd.DataFrame(columns=["open", "high", "low", "close"]))
-                contiguous = len(df) == 0 or f["start"] - df.index[-1] <= 2 * BAR
-                if not contiguous:
-                    df = df.iloc[0:0]                   # a hole in the data: start again rather than guess
-                df.loc[f["start"]] = [f["open"], f["high"], f["low"], f["close"]]
-                self.bars[name] = df.tail(int(self.s["keep_bars"]))
-                self._save(name)
-                if start - f["start"] == BAR:
-                    closed_now.append(name)
+                if f.get("n", 0) >= MIN_SAMPLES:        # a bar built from too few quotes is unreliable: drop it
+                    df.loc[f["start"]] = [f["open"], f["high"], f["low"], f["close"]]
+                    self.bars[name] = df.sort_index().tail(int(self.s["keep_bars"]))
+                    self._save(name)
+                    if start - f["start"] == BAR:
+                        closed_now.append(name)
                 f = None
             if not f:
-                self.forming[name] = {"start": start, "open": mid, "high": mid, "low": mid, "close": mid}
+                self.forming[name] = {"start": start, "open": mid, "high": mid, "low": mid, "close": mid, "n": 1}
             else:
-                f.update(high=max(f["high"], mid), low=min(f["low"], mid), close=mid)
+                f.update(high=max(f["high"], mid), low=min(f["low"], mid), close=mid, n=f.get("n", 0) + 1)
+        self._status(now)
         if closed_now:
             equity = self.r.broker.equity()
             for name in closed_now:
@@ -135,6 +132,16 @@ class ScalpEngine:
                 except Exception as exc:                # fail closed for this bar
                     self.r.event("SCALP_ERROR", market=name, error=repr(exc))
             self.r.save_state()
+
+    def _status(self, now: pd.Timestamp) -> None:
+        hour = now.floor("h")
+        if self._status_hour == hour:
+            return
+        self._status_hour = hour
+        self.r.event("SCALP_STATUS", markets={
+            n: {"bars": int(len(self.bars.get(n, ()))),
+                "warm": bool(len(self.bars.get(n, ())) >= self.rules(m).ema_trend + 10)}
+            for n, m in self.markets.items()})
 
     def _on_bar(self, name: str, equity: float, now: pd.Timestamp) -> None:
         mkt = self.markets[name]
@@ -150,6 +157,9 @@ class ScalpEngine:
         df = self.bars[name]
         if len(df) < rules.ema_trend + 10:
             return
+        recent = df.index[-8:]
+        if len(recent) < 8 or recent[-1] != now.floor("15min") - BAR or not (recent[1:] - recent[:-1] == BAR).all():
+            return                                      # recent data is not 2h of unbroken bars (outage or reopen)
         row = indicators(df, rules).iloc[-1]
         hours = tuple(mkt["scalp"]["hours_utc"])
         act = decide(row, rules) if in_session(now, hours) else None

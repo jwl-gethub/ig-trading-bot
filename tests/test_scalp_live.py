@@ -110,3 +110,72 @@ def test_low_allowance_means_no_seed_and_no_trading_until_warm(cfg, tmp_path):
         assert broker.orders == []
     finally:
         FakeBroker.allowance_remaining = keep
+
+
+def _bars(r):
+    return r.scalp.bars["EURUSD"]
+
+
+def test_gap_in_quotes_keeps_history_and_bars_resume(cfg, tmp_path):
+    r, broker = _setup(cfg, tmp_path, [0.3] * 60)
+    before = len(_bars(r))
+    _run(r, broker, T0, 20)
+    n1 = len(_bars(r))
+    assert n1 >= before
+    _run(r, broker, T0 + pd.Timedelta(minutes=300), 35)       # market closed for 4h40m, then quotes resume
+    assert len(_bars(r)) >= n1
+    assert len(_bars(r)) > n1 or _bars(r).index[-1] > T0
+    _run(r, broker, T0 + pd.Timedelta(minutes=335), 20)
+    assert len(_bars(r)) > n1
+
+
+def test_bar_with_few_samples_is_not_appended(cfg, tmp_path):
+    r, broker = _setup(cfg, tmp_path, [0.3] * 60)
+    start = T0 + pd.Timedelta(minutes=15)
+    _run(r, broker, start, 4)                                 # only 4 quotes in this 15m bar
+    n = len(_bars(r))
+    _run(r, broker, start + pd.Timedelta(minutes=15), 3)      # next bar closes the thin one
+    assert start not in _bars(r).index and len(_bars(r)) == n
+    assert broker.orders == []
+    _run(r, broker, start + pd.Timedelta(minutes=18), 30)     # full bars are appended
+    assert len(_bars(r)) > n
+
+
+def test_startup_keeps_stored_bars_on_big_gap_with_low_allowance(cfg, tmp_path):
+    r, broker = _setup(cfg, tmp_path, [0.3] * 5)
+    stored = len(_bars(r))
+    assert stored >= 210
+    FakeBroker.allowance_remaining, keep = 500, FakeBroker.allowance_remaining
+    try:
+        r2 = LiveRunner(r.cfg, broker, tmp_path / "state", tmp_path / "logs2", dry_run=False)
+        r2.sleeves.ensure_bases(10_000)
+        r2.scalp.startup(T0 + pd.Timedelta(hours=40))
+        assert len(r2.scalp.bars["EURUSD"]) == stored
+    finally:
+        FakeBroker.allowance_remaining = keep
+    ready = [e for e in map(json.loads, (tmp_path / "logs2" / "decisions.jsonl").read_text().splitlines())
+             if e["event"] == "SCALP_READY"][0]
+    assert ready["bars"] == stored and ready["last_bar"] == _bars(r).index[-1].isoformat()
+
+
+def _entry_after_hole(cfg, tmp_path, hole_start):
+    r, broker = _setup(cfg, tmp_path, [-5, -5] + [0.3] * 12)
+    df = _bars(r)
+    r.scalp.bars["EURUSD"] = df.drop(index=[hole_start])      # one missing bar inside the last 2 hours
+    _run(r, broker, T0, 32)
+    return broker
+
+
+def test_no_entry_without_two_hours_of_consecutive_bars_but_entry_with_them(cfg, tmp_path):
+    blocked = _entry_after_hole(cfg, tmp_path / "a", T0 - pd.Timedelta(minutes=60))
+    assert blocked.orders == []                               # signal would fire, but data has a hole in last 8
+    ok = _entry_after_hole(cfg, tmp_path / "b", T0 - pd.Timedelta(minutes=150))
+    assert len(ok.orders) == 1
+
+
+def test_scalp_status_logged_at_most_once_per_hour(cfg, tmp_path):
+    r, broker = _setup(cfg, tmp_path, [0.3] * 200)
+    _run(r, broker, T0, 150)                                  # 10:00 -> 12:30: hours 10, 11, 12
+    st = _events(tmp_path, "SCALP_STATUS")
+    assert len(st) == 3
+    assert st[0]["markets"]["EURUSD"]["warm"] is True and st[0]["markets"]["EURUSD"]["bars"] >= 210
