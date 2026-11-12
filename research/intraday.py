@@ -143,6 +143,12 @@ def main() -> None:
             log({"event": "DONE"})
             while True:
                 time.sleep(3600)
+        if os.environ.get("RESEARCH_JOB") == "candle_audit":
+            from .candle_audit import run as run_candle_audit
+            run_candle_audit(cache)
+            log({"event": "DONE"})
+            while True:
+                time.sleep(3600)
         if os.environ.get("RESEARCH_JOB") == "structure":
             from .structure_test import run as run_structure
             run_structure(cache)
