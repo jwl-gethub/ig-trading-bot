@@ -30,6 +30,12 @@ def test_costs_reduce_pnl(cfg):
     cfg["safety"]["max_spread_pct_of_stop"] = None     # same trades in both runs: compare costs only
     for m in cfg["markets"]:
         m["max_spread_points"] = None
+    # Cost accounting test, not a sizing test: at the £100-per-trade sleeve risk (2026-11-12) drawdown halts and
+    # loss streaks make the two runs take different trades, so pin the sleeves to a small risk to compare like with like.
+    for sl in cfg["sleeves"].values():
+        sl["risk_per_trade_pct"] = min(sl["risk_per_trade_pct"], 1.0)
+        if "min_size_max_risk_pct" in sl:
+            sl["min_size_max_risk_pct"] = max(sl["min_size_max_risk_pct"], sl["risk_per_trade_pct"])
     data = synthetic_universe(cfg["markets"], 1500, regimes=True)
     with_cost = Backtester(cfg, data, 50_000).run()
     free = copy.deepcopy(cfg)

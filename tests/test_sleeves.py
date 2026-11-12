@@ -96,13 +96,15 @@ def test_sleeve_loss_streak_is_per_sleeve(cfg):
     s = Sleeves(cfg)
     for _ in range(4):
         s.on_trade_closed("leveraged", -100, TS)
-    assert s.risk_pct("leveraged") == 5.0 and s.risk_pct("trend") == 1.0
+    assert s.risk_pct("leveraged") == cfg["sleeves"]["leveraged"]["risk_per_trade_pct"] / 2
+    assert s.risk_pct("trend") == cfg["sleeves"]["trend"]["risk_per_trade_pct"]
 
 
 def test_min_size_tolerance_is_trend_only_and_halves_on_loss_streak(cfg):
     s = Sleeves(cfg)
-    assert s.min_size_max_risk_pct("trend") == 2.0
+    full = cfg["sleeves"]["trend"]["min_size_max_risk_pct"]
+    assert s.min_size_max_risk_pct("trend") == full
     assert s.min_size_max_risk_pct("meanrev") is None and s.min_size_max_risk_pct("leveraged") is None
     for _ in range(4):
         s.on_trade_closed("trend", -45, TS)
-    assert s.min_size_max_risk_pct("trend") == 1.0
+    assert s.min_size_max_risk_pct("trend") == full / 2

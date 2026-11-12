@@ -22,11 +22,12 @@ def test_live_requires_triple_lock(cfg):
 
 def test_live_risk_capped_until_approved(cfg):
     before = {n: sp["risk_per_trade_pct"] for n, sp in cfg["sleeves"].items()}
+    min_before = cfg["sleeves"]["trend"]["min_size_max_risk_pct"]
     apply_live_risk_cap(cfg, "LIVE")
     assert cfg["risk"]["risk_per_trade_pct"] == cfg["promotion"]["live_initial_risk_per_trade_pct"]
-    for n, sp in cfg["sleeves"].items():                       # sleeves halved too (1% -> 0.5%)
+    for n, sp in cfg["sleeves"].items():                       # sleeves halved too
         assert sp["risk_per_trade_pct"] == before[n] / 2
-    assert cfg["sleeves"]["trend"]["min_size_max_risk_pct"] == 1.0   # min-stake ceiling halved too
+    assert cfg["sleeves"]["trend"]["min_size_max_risk_pct"] == min_before / 2   # min-stake ceiling halved too
 
 
 def test_orders_without_stop_are_refused(cfg):
@@ -271,10 +272,12 @@ def test_live_sleeves_trade_independently_and_persist(cfg, make_broker, tmp_path
         if e["sleeve"] == "leveraged":
             assert e["exposure_x"] <= 20.0 + 1e-6 and e["risk"] <= 0.10 * e["sleeve_equity"] + 1e-6
         else:
-            cap = (cfg["sleeves"][e["sleeve"]].get("min_size_max_risk_pct") or 1.0) if e["min_size_trade"] else 1.0
-            assert e["exposure_x"] <= 3.0 + 1e-6 and e["risk"] <= cap / 100 * e["sleeve_equity"] + 1e-6
+            sp = cfg["sleeves"][e["sleeve"]]
+            base = sp["risk_per_trade_pct"]
+            cap = max(sp.get("min_size_max_risk_pct") or base, base) if e["min_size_trade"] else base
+            assert e["exposure_x"] <= sp["max_leverage"] + 1e-6 and e["risk"] <= cap / 100 * e["sleeve_equity"] + 1e-6
             if e["min_size_trade"]:
-                assert e["sleeve"] == "trend" and e["risk"] > 0.01 * e["sleeve_equity"]
+                assert e["sleeve"] == "trend"
     # positions are keyed per sleeve, and sleeve state survives a restart
     assert all(":" in k for k in r.positions)
     r2 = LiveRunner(r.cfg, broker, tmp_path / "state", tmp_path / "logs", dry_run=False)

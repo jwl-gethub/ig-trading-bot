@@ -182,6 +182,11 @@ The account is split into independent virtual pots, so the strategies don't comp
   - the daily and weekly loss limits
   - the 15% account drawdown halt, which closes everything
 
+**Per-trade risk raised to £100 (2026-11-12, human's instruction, demo):** every sleeve now risks £100 per trade (leveraged 10%, trend 4%, meanrev 6.67%, dip 5%, scalp 3.33% of its pot). Sleeve `max_leverage` for trend, meanrev and dip went from 3× to 10×; trend's `min_size_max_risk_pct` is now 4% (equal to its normal risk).
+- Account limits are unchanged: total open risk 3% = £300 (at most three full-size trades at once), daily loss stop 3% = £300, weekly 6% = £600, total exposure cap 5× the account.
+- Sleeve drawdown halts are unchanged. 20% of a pot is 3-5 losing trades.
+- The scalper's 1× ATR stops are so tight that the exposure caps will usually size it below £100.
+
 **Config validation:** sleeve weights must sum to ≤ 1. Each module belongs to one sleeve only. weight × sleeve risk must be ≤ the 2% per-trade ceiling. Sleeve hard limits: risk ≤ 10% of the sleeve, leverage ≤ 30×, drawdown ≤ 80%.
 
 **Consequence at these sizes:** this is from IG demo feasibility on 2026-11-08. FX and the indices fit every sleeve; their minimum stakes are around 0.03–0.04 per point. Gold, silver and copper have a minimum stake of £1 per point. With 2×ATR stops on 4H bars, gold's minimum risks about £72–76, which is 1.6–1.7% of the £4,500 trend sleeve. Silver's minimum risks about £168 and copper's about £268.

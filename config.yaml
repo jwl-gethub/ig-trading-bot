@@ -324,33 +324,33 @@ sleeves:
   trend:
     modules: [trend]
     weight: 0.25              # £2,500 (re-cut 2026-11-10 for the scalp sleeve)
-    risk_per_trade_pct: 1.0
-    min_size_max_risk_pct: 2.0  # approved by Wissam 2026-11-09: if IG's minimum stake (e.g. gold £1/pt)
-                                # risks more than 1%, take the minimum only if it risks <= 2% (~£90)
-    max_leverage: 3
+    risk_per_trade_pct: 4.0  # £100 per trade; raised 2026-11-12 at Wissam's instruction (demo)
+    min_size_max_risk_pct: 4.0  # £100 per trade; raised 2026-11-12 at Wissam's instruction (demo)
+                                # approved by Wissam 2026-11-09 (was 2.0); now equal to risk_per_trade_pct, so no extra allowance
+    max_leverage: 10  # £100 per trade; raised 2026-11-12 at Wissam's instruction (demo)
     max_open_positions: 2
     max_positions_per_group: 1
     max_drawdown_pct: 20
   meanrev:
     modules: [meanrev]
     weight: 0.15              # £1,500 (re-cut 2026-11-10)
-    risk_per_trade_pct: 1.0
-    max_leverage: 3
+    risk_per_trade_pct: 6.67  # £100 per trade; raised 2026-11-12 at Wissam's instruction (demo)
+    max_leverage: 10  # £100 per trade; raised 2026-11-12 at Wissam's instruction (demo)
     max_open_positions: 2
     max_positions_per_group: 1
     max_drawdown_pct: 20
   dip:                        # daily RSI(2) dip, quick exit (STRATEGY.md 6c); added 2026-11-09 at Wissam's request
     modules: [dip]
     weight: 0.20              # £2,000 (re-cut 2026-11-10)
-    risk_per_trade_pct: 1.0   # £40 per trade at the 2.5x ATR stop
-    max_leverage: 3
+    risk_per_trade_pct: 5.0  # £100 per trade; raised 2026-11-12 at Wissam's instruction (demo)
+    max_leverage: 10  # £100 per trade; raised 2026-11-12 at Wissam's instruction (demo)
     max_open_positions: 3
     max_positions_per_group: 2
     max_drawdown_pct: 20
   scalp:                      # 15-minute pullback scalper; requested by Wissam 2026-11-10 ("aggressive", demo)
     modules: [scalp]
     weight: 0.30              # £3,000
-    risk_per_trade_pct: 1.0   # £30 at the 1x ATR stop; take-profit 1.5x ATR
+    risk_per_trade_pct: 3.33  # £100 per trade; raised 2026-11-12 at Wissam's instruction (demo)
     max_leverage: 10          # tight stops need exposure; still capped by the account's 5x total
     max_open_positions: 3
     max_positions_per_group: 2
