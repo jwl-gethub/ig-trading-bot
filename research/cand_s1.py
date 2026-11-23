@@ -245,6 +245,7 @@ def run_tsmom(daily: dict[str, pd.DataFrame]) -> list[str]:
     det = np.nanmean(p.sgn, axis=2)
     tw = target_weights(p, det)
     U = build_units(p, tw)
+    diagnose(S, p, tw, U)
     res, cells = report_run(S, "primary", "splits", p, U)
     per_market_oos(S, "primary", p, cells)
     report_run(S, "primary", "cost_stress", p, U, STRESS)
@@ -275,6 +276,25 @@ def run_tsmom(daily: dict[str, pd.DataFrame]) -> list[str]:
         f"OOS_Sharpe={f2(o.get('sharpe'))}(>=0.5:{c[1]}) OOS_ann_ret%={f2(o.get('ann'))}(>=4:{c[2]}) "
         f"random_sign_p95_OOS={f2(p95)}(beaten:{c[3]})")
     return ["TSMOM_primary"] if ok else []
+
+
+def diagnose(S: str, p: Panel, tw: np.ndarray, U: np.ndarray) -> None:
+    """Sanity lines: per-market sigma / weight extremes and the largest gross exposures (to catch bad data)."""
+    wgt = np.abs(U) * p.Cf / CAPITAL
+    for j, n in enumerate(p.names):
+        t = np.abs(tw[:, j])
+        if not np.isfinite(t).any():
+            continue
+        k = int(np.nanargmax(t))
+        gap = np.abs(p.O[:, j] / np.r_[np.nan, p.Cf[:-1, j]] - 1)
+        say(S, "diag", "market", f"market={n} sigma_min={np.nanmin(p.sig[:, j]):.4f} sigma_med={np.nanmedian(p.sig[:, j]):.4f} "
+            f"max_abs_target={np.nanmax(t):.2f}@{p.dates[k].date()} max_gross_weight={np.nanmax(wgt[:, j]):.2f} "
+            f"open_gap_gt5pct_days={int(np.nansum(gap > 0.05))} max_open_gap={np.nanmax(gap):.3f}")
+    flat = np.argsort(-wgt.max(axis=0))[:3]
+    for j in flat:
+        i = int(np.argmax(wgt[:, j]))
+        say(S, "diag", "top_exposure", f"market={p.names[j]} date={p.dates[i].date()} weight={wgt[i, j]:.2f} open={p.O[i, j]:.5g} "
+            f"close={p.C[i, j]:.5g} prev_close={p.Cf[i - 1, j]:.5g} units={U[i, j]:.4g}")
 
 
 def feas_lines(S: str, p: Panel, tw: np.ndarray) -> None:
