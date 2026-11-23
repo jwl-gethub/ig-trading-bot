@@ -149,6 +149,12 @@ def main() -> None:
             log({"event": "DONE"})
             while True:
                 time.sleep(3600)
+        if os.environ.get("RESEARCH_JOB") == "candidates":
+            from .candidates import run as run_candidates
+            run_candidates(cache)
+            log({"event": "DONE"})
+            while True:
+                time.sleep(3600)
         if os.environ.get("RESEARCH_JOB") == "structure":
             from .structure_test import run as run_structure
             run_structure(cache)
