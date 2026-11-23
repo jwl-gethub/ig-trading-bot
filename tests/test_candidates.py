@@ -359,3 +359,17 @@ def test_reports_run_end_to_end_and_print_prefixed_lines(capsys):
     assert out and all(line.startswith("CAND|") and line.count("|") >= 4 for line in out)
     assert sum("|verdict|" in line for line in out) == 3
     assert any("|cost_stress|" in line for line in out) and any("|min_stake|" in line for line in out)
+
+
+def test_fix_scale_breaks_repairs_tenfold_stretch_and_leaves_real_moves():
+    from research.cand_data import fix_scale_breaks
+    h = rw_hourly(11, years=1)
+    bad = h.copy()
+    sl = slice(2000, 3000)
+    for c in ("open", "high", "low", "close"):
+        bad.iloc[sl, bad.columns.get_loc(c)] *= 10
+    fixed, rep = fix_scale_breaks(bad)
+    assert len(rep) == 2
+    assert np.allclose(fixed[["open", "high", "low", "close"]].to_numpy(), h[["open", "high", "low", "close"]].to_numpy())
+    same, rep2 = fix_scale_breaks(h)
+    assert rep2 == [] and same is h

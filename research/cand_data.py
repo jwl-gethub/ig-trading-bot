@@ -121,7 +121,30 @@ class Hourly(HourlySource):
         out = pd.concat(frames).sort_index()
         out = out[~out.index.duplicated(keep="last")]
         bad = ~((out[["open", "high", "low", "close"]] > 0).all(axis=1) & (out.high >= out.low))
-        return out[~bad], failed, scale
+        out, repairs = fix_scale_breaks(out[~bad])
+        if repairs:
+            log(f"{m.name}: scale breaks repaired (date:log10 step): {','.join(repairs[:12])} total={len(repairs)}")
+        return out, failed, scale
+
+
+def fix_scale_breaks(h: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """Repair integer-scale breaks (a stretch of bars 10^k off): a bar opening more than 4x away from the previous close is
+    a scale break, not a market move (no instrument moves 4x in an hour). Bars after a break are rescaled by 10^-k so the
+    series is continuous; the LATEST segment keeps its scale. Returns (frame, list of 'date:k' repairs)."""
+    if len(h) < 2:
+        return h, []
+    r = np.log10(h.open.to_numpy(float)[1:] / h.close.to_numpy(float)[:-1])
+    k = np.where(np.abs(r) > 0.6, np.round(r), 0.0)
+    if not k.any():
+        return h, []
+    corr = np.r_[0.0, np.cumsum(-k)]
+    corr -= corr[-1]
+    f = 10.0 ** corr
+    out = h.copy()
+    for c in ("open", "high", "low", "close"):
+        out[c] = h[c].to_numpy(float) * f
+    where = [f"{h.index[i + 1].date()}:{int(k[i])}" for i in np.flatnonzero(k)]
+    return out, where
 
 
 def daily_21utc(h: pd.DataFrame, min_bars: int = MIN_BARS_PER_DAY) -> pd.DataFrame:
