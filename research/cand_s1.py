@@ -16,6 +16,7 @@ from .cand_common import (CAPITAL, SPLIT_NAMES, STRESS, UNIVERSE, annual_rate, f
 SEEDS = 20
 BAND = 0.25
 SIGMA_TARGET = 0.10
+MIN_SIGMA = 0.02
 CAL0 = np.datetime64("2009-01-01")
 
 
@@ -69,7 +70,9 @@ class Panel:
             wk = self.week[ix]
             last = np.r_[wk[1:] != wk[:-1], False]          # last bar of its ISO week (and not the final bar)
             self.dec[ix, j] = last
-        self.valid = np.isfinite(self.sgn).all(axis=2) & np.isfinite(self.sig) & (self.sig > 0)
+        # data-sanity guard: a market with annualised 60-day vol under 2% (stale/flat feed; lowest genuine value in the universe
+        # is ~2.3%) is treated as having no usable history that day, otherwise 10%/sigma explodes
+        self.valid = np.isfinite(self.sgn).all(axis=2) & np.isfinite(self.sig) & (self.sig >= MIN_SIGMA)
         self.dec &= self.valid
         wmax = self.week.max() + 1
         cnt = np.bincount(self.week, weights=self.dec.sum(axis=1), minlength=wmax)
