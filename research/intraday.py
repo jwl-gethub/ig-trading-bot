@@ -149,7 +149,7 @@ def main() -> None:
             log({"event": "DONE"})
             while True:
                 time.sleep(3600)
-        if os.environ.get("RESEARCH_JOB") == "candidates":
+        if os.environ.get("RESEARCH_JOB", "").startswith("candidates"):   # "candidates_<tag>" re-runs (a new value redeploys)
             from .candidates import run as run_candidates
             run_candidates(cache)
             log({"event": "DONE"})
